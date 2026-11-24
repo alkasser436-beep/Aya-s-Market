@@ -1,0 +1,247 @@
+{
+  "entities": {
+    "StoreConfig": {
+      "title": "StoreConfig",
+      "description": "Global supermarket configuration including daily USD to LBP exchange rate and delivery fees.",
+      "type": "object",
+      "properties": {
+        "exchangeRateLbp": {
+          "type": "number",
+          "description": "Current USD to Lebanese Lira exchange rate."
+        },
+        "deliveryFeeUsd": {
+          "type": "number",
+          "description": "Standard delivery fee in USD."
+        },
+        "freeDeliveryThresholdUsd": {
+          "type": "number",
+          "description": "Minimum subtotal in USD for free delivery."
+        },
+        "storeNameEn": {
+          "type": "string",
+          "description": "English store name."
+        },
+        "storeNameAr": {
+          "type": "string",
+          "description": "Arabic store name."
+        },
+        "supportPhone": {
+          "type": "string",
+          "description": "Store support phone number."
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Admin UID that last updated the config."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "exchangeRateLbp",
+        "deliveryFeeUsd",
+        "freeDeliveryThresholdUsd",
+        "storeNameEn",
+        "storeNameAr",
+        "supportPhone",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Bilingual supermarket catalog item priced in USD base currency.",
+      "type": "object",
+      "properties": {
+        "nameEn": { "type": "string" },
+        "nameAr": { "type": "string" },
+        "descriptionEn": { "type": "string" },
+        "descriptionAr": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["FRUITS_VEG", "DAIRY", "BAKERY", "BEVERAGES", "HOUSEHOLD"]
+        },
+        "priceUsd": { "type": "number" },
+        "discountPercent": { "type": "integer" },
+        "stock": { "type": "integer" },
+        "unitEn": { "type": "string" },
+        "unitAr": { "type": "string" },
+        "barcode": { "type": "string" },
+        "imageKey": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "nameEn",
+        "nameAr",
+        "category",
+        "priceUsd",
+        "discountPercent",
+        "stock",
+        "unitEn",
+        "unitAr",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PromoBanner": {
+      "title": "PromoBanner",
+      "description": "Bilingual promotional banner shown on the Customer home screen.",
+      "type": "object",
+      "properties": {
+        "titleEn": { "type": "string" },
+        "titleAr": { "type": "string" },
+        "subtitleEn": { "type": "string" },
+        "subtitleAr": { "type": "string" },
+        "badgeText": { "type": "string" },
+        "category": { "type": "string" },
+        "bannerKey": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "titleEn",
+        "titleAr",
+        "category",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserAddress": {
+      "title": "UserAddress",
+      "description": "Customer saved delivery address and pinned GPS coordinates.",
+      "type": "object",
+      "properties": {
+        "label": { "type": "string" },
+        "addressLine": { "type": "string" },
+        "city": { "type": "string" },
+        "phone": { "type": "string" },
+        "notes": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "defaultAddress": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "label",
+        "addressLine",
+        "city",
+        "phone",
+        "latitude",
+        "longitude",
+        "defaultAddress",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DriverProfile": {
+      "title": "DriverProfile",
+      "description": "Delivery driver profile available for order assignment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "nameEn": { "type": "string" },
+        "nameAr": { "type": "string" },
+        "phone": { "type": "string" },
+        "vehicleLabel": { "type": "string" },
+        "available": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "nameEn",
+        "nameAr",
+        "phone",
+        "available",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Real-time supermarket order synchronized across Customer, Admin, and Driver.",
+      "type": "object",
+      "properties": {
+        "customerUid": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "deliveryAddress": { "type": "string" },
+        "deliveryNotes": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD", "LBP"] },
+        "exchangeRateAtOrder": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["CASH_ON_DELIVERY", "WHISH_MONEY", "CARD"] },
+        "subtotalUsd": { "type": "number" },
+        "deliveryFeeUsd": { "type": "number" },
+        "totalUsd": { "type": "number" },
+        "totalLbp": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"]
+        },
+        "items": { "type": "array" },
+        "driverUid": { "type": "string" },
+        "driverName": { "type": "string" },
+        "driverPhone": { "type": "string" },
+        "cashCollected": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "customerUid",
+        "customerName",
+        "customerPhone",
+        "deliveryAddress",
+        "latitude",
+        "longitude",
+        "currency",
+        "exchangeRateAtOrder",
+        "paymentMethod",
+        "subtotalUsd",
+        "deliveryFeeUsd",
+        "totalUsd",
+        "totalLbp",
+        "status",
+        "items",
+        "cashCollected",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/store_config/{configId}": {
+      "schema": { "$ref": "#/entities/StoreConfig" },
+      "description": "Global store configuration singleton document (main)."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Supermarket product catalog."
+    },
+    "/promos/{promoId}": {
+      "schema": { "$ref": "#/entities/PromoBanner" },
+      "description": "Promotional store banners."
+    },
+    "/users/{userId}/addresses/{addressId}": {
+      "schema": { "$ref": "#/entities/UserAddress" },
+      "description": "Customer saved delivery locations."
+    },
+    "/drivers/{driverId}": {
+      "schema": { "$ref": "#/entities/DriverProfile" },
+      "description": "Delivery driver roster."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Shared real-time customer orders."
+    }
+  }
+}

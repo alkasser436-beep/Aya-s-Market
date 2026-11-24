@@ -1,0 +1,279 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global security helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email_verified == true &&
+        'email' in request.auth.token &&
+        request.auth.token.email == 'alkasser436@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isValidCategory(cat) {
+      return cat in ['FRUITS_VEG', 'DAIRY', 'BAKERY', 'BEVERAGES', 'HOUSEHOLD'];
+    }
+
+    function isValidStoreConfig(data) {
+      return data.keys().hasAll([
+          'exchangeRateLbp', 'deliveryFeeUsd', 'freeDeliveryThresholdUsd',
+          'storeNameEn', 'storeNameAr', 'supportPhone', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'exchangeRateLbp', 'deliveryFeeUsd', 'freeDeliveryThresholdUsd',
+          'storeNameEn', 'storeNameAr', 'supportPhone', 'updatedBy', 'updatedAt'
+        ]) &&
+        (data.exchangeRateLbp is int || data.exchangeRateLbp is float) &&
+        data.exchangeRateLbp >= 1000 && data.exchangeRateLbp <= 10000000 &&
+        (data.deliveryFeeUsd is int || data.deliveryFeeUsd is float) &&
+        data.deliveryFeeUsd >= 0 && data.deliveryFeeUsd <= 100 &&
+        (data.freeDeliveryThresholdUsd is int || data.freeDeliveryThresholdUsd is float) &&
+        data.freeDeliveryThresholdUsd >= 0 && data.freeDeliveryThresholdUsd <= 1000 &&
+        data.storeNameEn is string && data.storeNameEn.size() >= 1 && data.storeNameEn.size() <= 80 &&
+        data.storeNameAr is string && data.storeNameAr.size() >= 1 && data.storeNameAr.size() <= 80 &&
+        data.supportPhone is string && data.supportPhone.size() >= 3 && data.supportPhone.size() <= 30 &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'nameEn', 'nameAr', 'category', 'priceUsd', 'discountPercent',
+          'stock', 'unitEn', 'unitAr', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'nameEn', 'nameAr', 'descriptionEn', 'descriptionAr', 'category',
+          'priceUsd', 'discountPercent', 'stock', 'unitEn', 'unitAr',
+          'barcode', 'imageKey', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 100 &&
+        data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 100 &&
+        (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 300)) &&
+        (!('descriptionAr' in data) || (data.descriptionAr is string && data.descriptionAr.size() <= 300)) &&
+        data.category is string && isValidCategory(data.category) &&
+        (data.priceUsd is int || data.priceUsd is float) && data.priceUsd > 0 && data.priceUsd <= 10000 &&
+        data.discountPercent is int && data.discountPercent >= 0 && data.discountPercent <= 90 &&
+        data.stock is int && data.stock >= 0 && data.stock <= 100000 &&
+        data.unitEn is string && data.unitEn.size() >= 1 && data.unitEn.size() <= 30 &&
+        data.unitAr is string && data.unitAr.size() >= 1 && data.unitAr.size() <= 30 &&
+        (!('barcode' in data) || (data.barcode is string && data.barcode.size() <= 40)) &&
+        (!('imageKey' in data) || (data.imageKey is string && data.imageKey.size() <= 500)) &&
+        data.active is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPromo(data) {
+      return data.keys().hasAll(['titleEn', 'titleAr', 'category', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'titleEn', 'titleAr', 'subtitleEn', 'subtitleAr', 'badgeText',
+          'category', 'bannerKey', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.titleEn is string && data.titleEn.size() >= 1 && data.titleEn.size() <= 100 &&
+        data.titleAr is string && data.titleAr.size() >= 1 && data.titleAr.size() <= 100 &&
+        (!('subtitleEn' in data) || (data.subtitleEn is string && data.subtitleEn.size() <= 200)) &&
+        (!('subtitleAr' in data) || (data.subtitleAr is string && data.subtitleAr.size() <= 200)) &&
+        (!('badgeText' in data) || (data.badgeText is string && data.badgeText.size() <= 30)) &&
+        data.category is string && (data.category == 'ALL' || isValidCategory(data.category)) &&
+        (!('bannerKey' in data) || (data.bannerKey is string && data.bannerKey.size() <= 500)) &&
+        data.active is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAddress(data) {
+      return data.keys().hasAll([
+          'label', 'addressLine', 'city', 'phone', 'latitude', 'longitude',
+          'defaultAddress', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'label', 'addressLine', 'city', 'phone', 'notes', 'latitude', 'longitude',
+          'defaultAddress', 'createdAt', 'updatedAt'
+        ]) &&
+        data.label is string && data.label.size() >= 1 && data.label.size() <= 40 &&
+        data.addressLine is string && data.addressLine.size() >= 1 && data.addressLine.size() <= 200 &&
+        data.city is string && data.city.size() >= 1 && data.city.size() <= 60 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 200)) &&
+        (data.latitude is int || data.latitude is float) && data.latitude >= -90 && data.latitude <= 90 &&
+        (data.longitude is int || data.longitude is float) && data.longitude >= -180 && data.longitude <= 180 &&
+        data.defaultAddress is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidDriver(data) {
+      return data.keys().hasAll(['uid', 'nameEn', 'nameAr', 'phone', 'available', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'nameEn', 'nameAr', 'phone', 'vehicleLabel', 'available', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
+        data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        (!('vehicleLabel' in data) || (data.vehicleLabel is string && data.vehicleLabel.size() <= 60)) &&
+        data.available is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'customerUid', 'customerName', 'customerPhone', 'deliveryAddress',
+          'latitude', 'longitude', 'currency', 'exchangeRateAtOrder', 'paymentMethod',
+          'subtotalUsd', 'deliveryFeeUsd', 'totalUsd', 'totalLbp', 'status',
+          'items', 'cashCollected', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'customerUid', 'customerName', 'customerPhone', 'deliveryAddress',
+          'deliveryNotes', 'latitude', 'longitude', 'currency', 'exchangeRateAtOrder',
+          'paymentMethod', 'subtotalUsd', 'deliveryFeeUsd', 'totalUsd', 'totalLbp',
+          'status', 'items', 'driverUid', 'driverName', 'driverPhone',
+          'cashCollected', 'createdAt', 'updatedAt'
+        ]) &&
+        data.customerUid is string && data.customerUid.size() >= 1 && data.customerUid.size() <= 128 &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 80 &&
+        data.customerPhone is string && data.customerPhone.size() >= 3 && data.customerPhone.size() <= 30 &&
+        data.deliveryAddress is string && data.deliveryAddress.size() >= 1 && data.deliveryAddress.size() <= 250 &&
+        (!('deliveryNotes' in data) || (data.deliveryNotes is string && data.deliveryNotes.size() <= 300)) &&
+        (data.latitude is int || data.latitude is float) && data.latitude >= -90 && data.latitude <= 90 &&
+        (data.longitude is int || data.longitude is float) && data.longitude >= -180 && data.longitude <= 180 &&
+        data.currency in ['USD', 'LBP'] &&
+        (data.exchangeRateAtOrder is int || data.exchangeRateAtOrder is float) && data.exchangeRateAtOrder > 0 &&
+        data.paymentMethod in ['CASH_ON_DELIVERY', 'WHISH_MONEY', 'CARD'] &&
+        (data.subtotalUsd is int || data.subtotalUsd is float) && data.subtotalUsd >= 0 &&
+        (data.deliveryFeeUsd is int || data.deliveryFeeUsd is float) && data.deliveryFeeUsd >= 0 &&
+        (data.totalUsd is int || data.totalUsd is float) && data.totalUsd > 0 &&
+        (data.totalLbp is int || data.totalLbp is float) && data.totalLbp > 0 &&
+        data.status in ['PENDING', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'] &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map &&
+        (!('driverUid' in data) || (data.driverUid is string && data.driverUid.size() <= 128)) &&
+        (!('driverName' in data) || (data.driverName is string && data.driverName.size() <= 80)) &&
+        (!('driverPhone' in data) || (data.driverPhone is string && data.driverPhone.size() <= 30)) &&
+        data.cashCollected is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    // Store Configuration (singleton 'main')
+    match /store_config/{configId} {
+      allow get: if isSignedIn() && configId == 'main';
+      allow create, update: if isAdmin() && configId == 'main' && isValidStoreConfig(incoming());
+    }
+
+    // Supermarket Catalog Products
+    match /products/{productId} {
+      allow get: if isSignedIn() && isValidId(productId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming()) &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Promotional Banners
+    match /promos/{promoId} {
+      allow get: if isSignedIn() && isValidId(promoId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(promoId) && isValidPromo(incoming());
+      allow update: if isAdmin() && isValidId(promoId) && isValidPromo(incoming()) &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(promoId);
+    }
+
+    // Customer Saved Delivery Addresses (Strict PII isolation)
+    match /users/{userId}/addresses/{addressId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(addressId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(addressId) && isValidAddress(incoming());
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidId(addressId) &&
+                       isValidAddress(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(addressId);
+    }
+
+    // Delivery Driver Roster
+    match /drivers/{driverId} {
+      allow get: if isSignedIn() && isValidId(driverId) && (isAdmin() || request.auth.uid == driverId || existing().uid == request.auth.uid);
+      allow list: if isBootstrappedAdmin() || (isSignedIn() && existing().uid == request.auth.uid);
+      allow create: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
+      allow update: if isSignedIn() && isValidId(driverId) && isValidDriver(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().uid == existing().uid && (
+                         isAdmin() ||
+                         (existing().uid == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['available', 'updatedAt']))
+                       );
+      allow delete: if isAdmin() && isValidId(driverId);
+    }
+
+    // Orders (Customer creates/reads own; Driver reads/updates assigned; Admin manages all)
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && (
+        isAdmin() ||
+        existing().customerUid == request.auth.uid ||
+        existing().driverUid == request.auth.uid
+      );
+      allow list: if isBootstrappedAdmin() || (
+        isSignedIn() && (
+          existing().customerUid == request.auth.uid ||
+          existing().driverUid == request.auth.uid
+        )
+      );
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) &&
+                       incoming().customerUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().cashCollected == false &&
+                       (!('driverUid' in incoming()) || incoming().driverUid == '');
+      allow update: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) &&
+                       incoming().customerUid == existing().customerUid &&
+                       incoming().createdAt == existing().createdAt && (
+                         isAdmin() ||
+                         (existing().status != 'DELIVERED' && existing().status != 'CANCELLED' &&
+                          existing().driverUid == request.auth.uid && (
+                            (existing().status == 'PREPARING' && incoming().status == 'OUT_FOR_DELIVERY' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+                            (existing().status == 'OUT_FOR_DELIVERY' && incoming().status == 'DELIVERED' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cashCollected', 'updatedAt']))
+                          )) ||
+                         (existing().status == 'PENDING' && existing().customerUid == request.auth.uid &&
+                          incoming().status == 'CANCELLED' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                       );
+      allow delete: if isAdmin() && isValidId(orderId);
+    }
+
+    // Explicit Admin Roster (read self or admin)
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+    }
+  }
+}

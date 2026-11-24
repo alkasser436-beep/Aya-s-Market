@@ -1,0 +1,6 @@
+{
+  "name": "Aya Market",
+  "description": "Bilingual (AR/EN) & dual-currency (USD/LBP) supermarket system with Customer, Admin Dashboard, and Delivery Driver modes powered by real-time Firestore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
