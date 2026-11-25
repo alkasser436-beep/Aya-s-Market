@@ -71,8 +71,6 @@ import com.example.data.model.AppLanguage
 import com.example.data.model.AppRole
 import com.example.data.remote.AyaMarketRepository
 import com.example.localization.AppStrings
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 
 @Composable
 fun AuthScreen(
@@ -82,6 +80,7 @@ fun AuthScreen(
     onToggleLanguage: () -> Unit,
     externalError: String? = null,
     signedInUnauthorizedEmail: String? = null,
+    firebaseReady: Boolean = true,
     onSignOutClick: () -> Unit = {},
     onAuthSuccess: () -> Unit
 ) {
@@ -91,8 +90,9 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(selectedRole) {
-        val currentUser = Firebase.auth.currentUser
+    LaunchedEffect(selectedRole, firebaseReady) {
+        if (!firebaseReady) return@LaunchedEffect
+        val currentUser = safeCurrentFirebaseUser(context)
         if (currentUser != null) {
             if (selectedRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(currentUser)) {
                 onAuthSuccess()
@@ -102,7 +102,7 @@ fun AuthScreen(
                 context = context,
                 credentialManager = credentialManager,
                 onAuthSuccess = {
-                    val user = Firebase.auth.currentUser
+                    val user = safeCurrentFirebaseUser(context)
                     if (selectedRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(user)) {
                         onAuthSuccess()
                     }
@@ -430,7 +430,7 @@ fun AuthScreen(
                             OutlinedButton(
                                 onClick = {
                                     errorMessage = null
-                                    signOutUser(credentialManager, scope) {
+                                    signOutUser(context, credentialManager, scope) {
                                         onSignOutClick()
                                     }
                                 },
@@ -450,16 +450,16 @@ fun AuthScreen(
                             onClick = {
                                 errorMessage = null
                                 isLoading = true
-                                signOutUser(credentialManager, scope) {
+                                signOutUser(context, credentialManager, scope) {
                                     onGoogleSignInClicked(
                                         context = context,
                                         credentialManager = credentialManager,
                                         onAuthSuccess = {
                                             isLoading = false
-                                            val user = Firebase.auth.currentUser
+                                            val user = safeCurrentFirebaseUser(context)
                                             if (selectedRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
                                                 val attempted = user?.email ?: ""
-                                                signOutUser(credentialManager, scope) {
+                                                signOutUser(context, credentialManager, scope) {
                                                     errorMessage = if (language == AppLanguage.AR)
                                                         "دخول مرفوض ($attempted): قسم الإدارة محصور بحساب مالك المتجر فقط."
                                                     else
@@ -478,7 +478,7 @@ fun AuthScreen(
                                     )
                                 }
                             },
-                            enabled = !isLoading,
+                            enabled = firebaseReady && !isLoading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(54.dp)

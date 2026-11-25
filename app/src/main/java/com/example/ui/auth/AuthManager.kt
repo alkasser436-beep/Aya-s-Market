@@ -13,8 +13,11 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -22,6 +25,19 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 private const val TAG = "Auth"
+
+fun isFirebaseReady(context: Context): Boolean = try {
+    FirebaseApp.getApps(context.applicationContext).isNotEmpty() ||
+        FirebaseApp.initializeApp(context.applicationContext) != null
+} catch (t: Throwable) {
+    Log.w(TAG, "Firebase initialization unavailable: ${t.message}")
+    false
+}
+
+fun safeCurrentFirebaseUser(context: Context): FirebaseUser? {
+    if (!isFirebaseReady(context)) return null
+    return runCatching { Firebase.auth.currentUser }.getOrNull()
+}
 
 private fun resolveWebClientId(context: Context): String? {
     val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
@@ -36,7 +52,11 @@ fun attemptAutoSignIn(
     onUnauthenticated: () -> Unit,
     scope: CoroutineScope
 ) {
-    if (Firebase.auth.currentUser != null) {
+    if (!isFirebaseReady(context)) {
+        onUnauthenticated()
+        return
+    }
+    if (safeCurrentFirebaseUser(context) != null) {
         onAuthSuccess()
         return
     }
@@ -44,16 +64,16 @@ fun attemptAutoSignIn(
         onUnauthenticated()
         return
     }
-    val googleIdOption = GetGoogleIdOption.Builder()
-        .setFilterByAuthorizedAccounts(true)
-        .setServerClientId(clientId)
-        .setAutoSelectEnabled(true)
-        .build()
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(googleIdOption)
-        .build()
     scope.launch {
         try {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(true)
+                .setServerClientId(clientId)
+                .setAutoSelectEnabled(true)
+                .build()
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
             val result = credentialManager.getCredential(context, request)
             val cred = result.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
@@ -63,7 +83,9 @@ fun attemptAutoSignIn(
             } else {
                 onUnauthenticated()
             }
-        } catch (_: Exception) {
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Throwable) {
             onUnauthenticated()
         }
     }
@@ -77,6 +99,10 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
+    if (!isFirebaseReady(context)) {
+        onAuthError("Firebase is not configured in this build (missing app/google-services.json).")
+        return
+    }
     val clientId = resolveWebClientId(context) ?: run {
         onAuthError("Google Sign-In configuration missing: add app/google-services.json with default_web_client_id")
         return
@@ -86,12 +112,12 @@ fun onGoogleSignInClicked(
         onAuthError("Unable to launch Google Sign-In without an Activity context")
         return
     }
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(signInOption)
-        .build()
     scope.launch {
         try {
+            val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(signInOption)
+                .build()
             val result = credentialManager.getCredential(activity, request)
             val cred = result.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
@@ -101,17 +127,20 @@ fun onGoogleSignInClicked(
             } else {
                 onAuthError("Unexpected credential type")
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
-        } catch (e: Exception) {
-            Log.e(TAG, "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "Sign in failed")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Google Sign-In failed", t)
+            onAuthError(t.localizedMessage ?: "Sign in failed")
         }
     }
 }
 
 fun signOutUser(
+    context: Context,
     credentialManager: CredentialManager,
     scope: CoroutineScope,
     onSignOutComplete: () -> Unit = {}
@@ -120,10 +149,12 @@ fun signOutUser(
         withContext(NonCancellable) {
             try {
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to clear credential state: ${e.message}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to clear credential state: ${t.message}")
             } finally {
-                Firebase.auth.signOut()
+                if (isFirebaseReady(context)) {
+                    runCatching { Firebase.auth.signOut() }
+                }
                 onSignOutComplete()
             }
         }

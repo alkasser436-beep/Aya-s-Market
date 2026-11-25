@@ -58,6 +58,8 @@ import com.example.data.remote.AyaMarketRepository
 import com.example.localization.AppStrings
 import com.example.ui.admin.AdminDashboardScreen
 import com.example.ui.auth.AuthScreen
+import com.example.ui.auth.isFirebaseReady
+import com.example.ui.auth.safeCurrentFirebaseUser
 import com.example.ui.auth.signOutUser
 import com.example.ui.components.AyaHeaderBar
 import com.example.ui.components.BarcodeScannerDialog
@@ -82,15 +84,22 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
         initialValue = com.example.data.preferences.UserPrefs()
     )
     val scope = rememberCoroutineScope()
+    val firebaseReady = remember(context) { isFirebaseReady(context) }
 
     var selectedRole by remember(appRole) { mutableStateOf(appRole) }
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
+    var currentUser by remember(firebaseReady) {
+        mutableStateOf(if (firebaseReady) safeCurrentFirebaseUser(context) else null)
+    }
+    DisposableEffect(firebaseReady) {
+        if (!firebaseReady) {
+            onDispose { }
+        } else {
+            val listener = FirebaseAuth.AuthStateListener { auth ->
+                currentUser = auth.currentUser
+            }
+            Firebase.auth.addAuthStateListener(listener)
+            onDispose { Firebase.auth.removeAuthStateListener(listener) }
         }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose { Firebase.auth.removeAuthStateListener(listener) }
     }
 
     val isArabic = userPrefs.language == AppLanguage.AR
@@ -99,22 +108,28 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         AyaMarketTheme(isArabic = isArabic) {
             val user = currentUser
-            val isAuthorizedForSelectedRole = user != null && (
+            val isAuthorizedForSelectedRole = firebaseReady && user != null && (
                 selectedRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(user)
             )
 
             if (!isAuthorizedForSelectedRole) {
-                val unauthorizedEmail = if (user != null && selectedRole == AppRole.ADMIN) {
+                val unauthorizedEmail = if (firebaseReady && user != null && selectedRole == AppRole.ADMIN) {
                     user.email ?: user.uid
                 } else null
 
-                val unauthorizedMessage = if (unauthorizedEmail != null) {
-                    if (isArabic) {
+                val authBannerError = when {
+                    !firebaseReady -> if (isArabic) {
+                        "إعدادات Firebase (google-services.json) غير موجودة في هذه النسخة. يرجى تحميل التطبيق عبر AI Studio أو إضافة ملف google-services.json."
+                    } else {
+                        "Firebase is not configured in this APK (missing google-services.json). Download from AI Studio or include app/google-services.json."
+                    }
+                    unauthorizedEmail != null -> if (isArabic) {
                         "دخول مرفوض ($unauthorizedEmail): حساب الإدارة حصري لمالك المتجر فقط. يمكنك تسجيل الخروج للدخول بحساب المالك أو اختيار المتسوق / السائق."
                     } else {
                         "Access denied ($unauthorizedEmail): Admin is locked to the store owner only. Switch to the owner Google account or select Customer / Driver."
                     }
-                } else null
+                    else -> null
+                }
 
                 AuthScreen(
                     selectedRole = selectedRole,
@@ -126,13 +141,14 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
                             prefsRepo.setLanguage(next)
                         }
                     },
-                    externalError = unauthorizedMessage,
+                    externalError = authBannerError,
                     signedInUnauthorizedEmail = unauthorizedEmail,
+                    firebaseReady = firebaseReady,
                     onSignOutClick = {
-                        currentUser = Firebase.auth.currentUser
+                        currentUser = safeCurrentFirebaseUser(context)
                     },
                     onAuthSuccess = {
-                        currentUser = Firebase.auth.currentUser
+                        currentUser = safeCurrentFirebaseUser(context)
                     }
                 )
             } else {
@@ -238,7 +254,7 @@ private fun AyaMarketAuthenticatedApp(
                     exchangeRateLbp = storeConfig.exchangeRateLbp,
                     onToggleLanguage = viewModel::toggleLanguage,
                     onToggleCurrency = viewModel::toggleCurrency,
-                    onSignOut = { signOutUser(credentialManager, scope) }
+                    onSignOut = { signOutUser(context, credentialManager, scope) }
                 )
             },
             bottomBar = {
