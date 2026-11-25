@@ -62,19 +62,33 @@ test("Unauthenticated users are blocked from all collections", async () => {
   await assertFails(unauth.collection("users").doc(CUSTOMER_UID).collection("addresses").get());
 });
 
-test("Email spoofing test: unverified admin email is rejected", async () => {
+test("Email spoofing & dual owner test: unverified or non-owner emails rejected; Ayasmarket44@gmail.com allowed", async () => {
   const spoof = spoofedAdminContext().firestore();
+  const nonOwner = testEnv.authenticatedContext("other_admin_try", {
+    email: "intruder@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const secondOwner = testEnv.authenticatedContext("admin_aya_2", {
+    email: "Ayasmarket44@gmail.com",
+    email_verified: true,
+  }).firestore();
   const now = new Date(Date.now() - 1000);
-  await assertFails(
-    spoof.collection("store_config").doc("main").set({
-      exchangeRateLbp: 89500,
-      deliveryFeeUsd: 2.0,
-      freeDeliveryThresholdUsd: 25.0,
-      storeNameEn: "Aya Market",
-      storeNameAr: "أيا ماركت",
-      supportPhone: "+961 70 123 456",
-      updatedBy: "spoof_uid",
-      updatedAt: now,
+  const configDoc = {
+    exchangeRateLbp: 89500,
+    deliveryFeeUsd: 2.0,
+    freeDeliveryThresholdUsd: 25.0,
+    storeNameEn: "Aya Market",
+    storeNameAr: "أيا ماركت",
+    supportPhone: "+961 70 123 456",
+    updatedBy: "spoof_uid",
+    updatedAt: now,
+  };
+  await assertFails(spoof.collection("store_config").doc("main").set(configDoc));
+  await assertFails(nonOwner.collection("store_config").doc("main").set(configDoc));
+  await assertSucceeds(
+    secondOwner.collection("store_config").doc("main").set({
+      ...configDoc,
+      updatedBy: "admin_aya_2",
     })
   );
 });

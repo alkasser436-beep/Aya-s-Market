@@ -1,5 +1,3 @@
 <resources>
     <string name="app_name">Aya Market</string>
-    <string name="app_name_admin">Aya Admin</string>
-    <string name="app_name_driver">Aya Driver</string>
 </resources>

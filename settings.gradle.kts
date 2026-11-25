@@ -24,4 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "Aya Market"
 
+include(":shared")
 include(":app")
+include(":admin")
+include(":driver")
