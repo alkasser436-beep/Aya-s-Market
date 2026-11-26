@@ -28,7 +28,7 @@ service cloud.firestore {
         'email_verified' in request.auth.token &&
         request.auth.token.email_verified == true &&
         'email' in request.auth.token &&
-        request.auth.token.email.lower() in ['alkasser436@gmail.com', 'ayasmarket44@gmail.com'];
+        request.auth.token.email.lower() == 'ayasmarket44@gmail.com';
     }
 
     function isAdmin() {

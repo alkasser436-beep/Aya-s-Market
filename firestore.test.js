@@ -18,14 +18,14 @@ const emulatorPort = parseInt(emulatorPortStr, 10);
 
 function adminContext() {
   return testEnv.authenticatedContext(ADMIN_UID, {
-    email: "alkasser436@gmail.com",
+    email: "ayasmarket44@gmail.com",
     email_verified: true,
   });
 }
 
 function spoofedAdminContext() {
   return testEnv.authenticatedContext("spoof_uid", {
-    email: "alkasser436@gmail.com",
+    email: "ayasmarket44@gmail.com",
     email_verified: false,
   });
 }
@@ -62,13 +62,13 @@ test("Unauthenticated users are blocked from all collections", async () => {
   await assertFails(unauth.collection("users").doc(CUSTOMER_UID).collection("addresses").get());
 });
 
-test("Email spoofing & dual owner test: unverified or non-owner emails rejected; Ayasmarket44@gmail.com allowed", async () => {
+test("Email spoofing & sole owner test: unverified or non-owner emails rejected; Ayasmarket44@gmail.com allowed", async () => {
   const spoof = spoofedAdminContext().firestore();
   const nonOwner = testEnv.authenticatedContext("other_admin_try", {
-    email: "intruder@gmail.com",
+    email: "alkasser436@gmail.com",
     email_verified: true,
   }).firestore();
-  const secondOwner = testEnv.authenticatedContext("admin_aya_2", {
+  const owner = testEnv.authenticatedContext("admin_aya_2", {
     email: "Ayasmarket44@gmail.com",
     email_verified: true,
   }).firestore();
@@ -86,7 +86,7 @@ test("Email spoofing & dual owner test: unverified or non-owner emails rejected;
   await assertFails(spoof.collection("store_config").doc("main").set(configDoc));
   await assertFails(nonOwner.collection("store_config").doc("main").set(configDoc));
   await assertSucceeds(
-    secondOwner.collection("store_config").doc("main").set({
+    owner.collection("store_config").doc("main").set({
       ...configDoc,
       updatedBy: "admin_aya_2",
     })

@@ -14,7 +14,7 @@ Each role lives in its own **independent Android application module and package 
    - Live order status tracker (`Pending` → `Preparing` → `Out for Delivery` → `Delivered`) with one-tap Call & WhatsApp to the assigned driver.
 
 2. **Aya Admin (`:admin` — `com.aistudio.ayamarket.admin.kxmpzq`) — Owner-Only Management App**
-   - **Strict Owner Lock**: Admin access is restricted strictly to verified store owner Google accounts (`ADMIN_OWNER_EMAILS` in `AyaMarketRepository.kt` and `isBootstrappedAdmin()` in `firestore.rules`: `alkasser436@gmail.com`, `Ayasmarket44@gmail.com`). Public admin registration is disabled.
+   - **Strict Owner Lock**: Admin access is restricted strictly to the verified store owner Google account (`ADMIN_OWNER_EMAILS` in `AyaMarketRepository.kt` and `isBootstrappedAdmin()` in `firestore.rules`: `ayasmarket44@gmail.com`). Public admin registration is disabled.
    - Live USD-to-LBP exchange rate & delivery fee control widget.
    - Analytics overview cards (Daily Sales in USD & LBP, Active Orders, Top-Selling Items).
    - Live incoming order board with notification sound chime, Accept/Reject, Driver Assignment, and Android `PrintManager` HTML invoice printing.
@@ -56,7 +56,7 @@ Security rules are defined in [`firestore.rules`](firestore.rules) with zero-tru
 ## Build & Test
 
 ### Building on GitHub Actions
-Because AI Studio does not push `google-services.json` to GitHub automatically, add your `app/google-services.json` contents once as a GitHub Repository Secret named **`GOOGLE_SERVICES_JSON`** (`Settings` → `Secrets and variables` → `Actions` → `New repository secret`). The CI workflow automatically copies it to `:app`, `:admin`, and `:driver` and builds 3 separate APKs (`aya-customer-debug-apk`, `aya-admin-debug-apk`, `aya-driver-debug-apk`).
+The repository includes `.github/workflows/android.yml`, which restores `debug.keystore` from `debug.keystore.base64`, configures Firebase for all 3 modules (`app`, `admin`, `driver` from the module `google-services` configs or the optional `GOOGLE_SERVICES_JSON` Repository Secret), runs unit tests, and builds 3 separate APKs (`aya-customer-debug-apk`, `aya-admin-debug-apk`, `aya-driver-debug-apk`). You can trigger builds automatically on `push` or manually via **Actions → Aya Market Android CI → Run workflow**.
 
 ```bash
 gradle :app:assembleDebug :admin:assembleDebug :driver:assembleDebug

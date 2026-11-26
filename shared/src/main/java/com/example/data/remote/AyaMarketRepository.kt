@@ -48,7 +48,6 @@ class AyaMarketRepository(
 
     companion object {
         val ADMIN_OWNER_EMAILS = setOf(
-            "alkasser436@gmail.com",
             "ayasmarket44@gmail.com"
         )
 

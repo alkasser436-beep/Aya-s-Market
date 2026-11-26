@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -147,7 +148,7 @@ jobs:
                   "Make sure you Push the latest changes from AI Studio to GitHub, AND either put app/google-services.json "
                   "into Repository secret GOOGLE_SERVICES_JSON or upload app/google-services.json to the repo."
               )
-              if os.environ.get("EVENT_NAME") == "push":
+              if os.environ.get("EVENT_NAME") in ("push", "workflow_dispatch"):
                   print(f"::error::{msg}")
                   sys.exit(1)
               else:
