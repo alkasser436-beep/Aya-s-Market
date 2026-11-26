@@ -55,6 +55,9 @@ Security rules are defined in [`firestore.rules`](firestore.rules) with zero-tru
 
 ## Build & Test
 
+### Building on GitHub Actions
+Because AI Studio does not push `google-services.json` to GitHub automatically, add your `app/google-services.json` contents once as a GitHub Repository Secret named **`GOOGLE_SERVICES_JSON`** (`Settings` → `Secrets and variables` → `Actions` → `New repository secret`). The CI workflow automatically copies it to `:app`, `:admin`, and `:driver` and builds 3 separate APKs (`aya-customer-debug-apk`, `aya-admin-debug-apk`, `aya-driver-debug-apk`).
+
 ```bash
 gradle :app:assembleDebug :admin:assembleDebug :driver:assembleDebug
 gradle :app:testDebugUnitTest --tests "com.example.ExampleUnitTest"

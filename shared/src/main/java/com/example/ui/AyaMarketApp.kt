@@ -118,9 +118,9 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
 
                 val authBannerError = when {
                     !firebaseReady -> if (isArabic) {
-                        "إعدادات Firebase (google-services.json) غير موجودة في هذه النسخة. يرجى إضافة ملف google-services.json أو التحميل من CI / AI Studio."
+                        "إعدادات Firebase (google-services.json) غير مدمجة في ملف APK هذا. أضف GOOGLE_SERVICES_JSON إلى GitHub Secrets قبل البناء أو صدّر ملف APK مباشرة من AI Studio."
                     } else {
-                        "Firebase is not configured in this APK (missing google-services.json)."
+                        "Firebase is not configured in this APK (missing google-services.json). Add GOOGLE_SERVICES_JSON to GitHub Secrets before building, or download the APK from AI Studio."
                     }
                     unauthorizedEmail != null -> if (isArabic) {
                         "دخول مرفوض ($unauthorizedEmail): تطبيق الإدارة حصري لحسابات مالك المتجر فقط. قم بتبديل الحساب لحساب المالك."

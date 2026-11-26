@@ -26,12 +26,16 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "Auth"
 
-fun isFirebaseReady(context: Context): Boolean = try {
-    FirebaseApp.getApps(context.applicationContext).isNotEmpty() ||
-        FirebaseApp.initializeApp(context.applicationContext) != null
-} catch (t: Throwable) {
-    Log.w(TAG, "Firebase initialization unavailable: ${t.message}")
-    false
+fun isFirebaseReady(context: Context): Boolean {
+    val appCtx = context.applicationContext
+    val initialized = try {
+        FirebaseApp.getApps(appCtx).isNotEmpty() ||
+            FirebaseApp.initializeApp(appCtx) != null
+    } catch (t: Throwable) {
+        Log.w(TAG, "Firebase initialization unavailable: ${t.message}")
+        false
+    }
+    return initialized && resolveWebClientId(appCtx) != null
 }
 
 fun safeCurrentFirebaseUser(context: Context): FirebaseUser? {
