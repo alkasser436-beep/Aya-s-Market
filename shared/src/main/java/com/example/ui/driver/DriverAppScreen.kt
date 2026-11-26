@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.LocalShipping
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material3.Button
@@ -34,10 +35,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AppCurrency
 import com.example.data.model.AppLanguage
@@ -63,17 +67,149 @@ import com.example.ui.components.OrderStatusBadge
 fun DriverAppScreen(
     language: AppLanguage,
     currentUserId: String,
+    currentUserEmail: String = "",
     driverOrdersState: UiState<List<Order>>,
     driversState: UiState<List<DriverProfile>>,
+    onClaimDriverUid: (String) -> Unit = {},
     onToggleAvailability: (String, Boolean) -> Unit,
     onMarkPickedUp: (String) -> Unit,
     onConfirmDelivered: (String) -> Unit,
+    onSignOut: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val normalizedEmail = currentUserEmail.trim().lowercase()
     val myDriverProfile = (driversState as? UiState.Success)?.data
-        ?.firstOrNull { it.uid == currentUserId || it.id == currentUserId }
+        ?.firstOrNull {
+            it.uid == currentUserId ||
+                it.id == currentUserId ||
+                (normalizedEmail.isNotBlank() && it.email.equals(normalizedEmail, ignoreCase = true))
+        }
+
+    LaunchedEffect(myDriverProfile?.id, myDriverProfile?.uid) {
+        if (myDriverProfile != null && myDriverProfile.uid.isBlank()) {
+            onClaimDriverUid(myDriverProfile.id)
+        }
+    }
+
+    if (driversState is UiState.Loading) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    if (driversState is UiState.Error) {
+        EmptyStateCard(
+            title = if (language == AppLanguage.AR) "تعذر التحقق من حساب السائق" else "Unable to verify driver account",
+            subtitle = driversState.message,
+            actionLabel = AppStrings.signOut(language),
+            onAction = onSignOut,
+            modifier = modifier.fillMaxSize()
+        )
+        return
+    }
+
+    if (driversState is UiState.Success && myDriverProfile == null) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFFFFF3E0),
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFFE65100),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (language == AppLanguage.AR) "بانتظار إضافة الإدارة" else "Driver Access Restricted",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "تطبيق التوصيل مخصص فقط للسائقين الذين تضيفهم الإدارة من لوحة التحكم. اطلب من مالك المتجر إضافة بريدك الإلكتروني التالي:"
+                        else
+                            "Aya Driver is locked to drivers added by the Store Admin. Ask the store owner to add your Google email below:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    val identityToCopy = currentUserEmail.ifBlank { currentUserId }
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (language == AppLanguage.AR) "بريد السائق:" else "Driver Google Email:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = identityToCopy,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            IconButton(onClick = { clipboard.setText(AnnotatedString(identityToCopy)) }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentCopy,
+                                    contentDescription = "Copy Driver Email"
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onSignOut,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("driver_unauthorized_signout"),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "تبديل الحساب / تسجيل الخروج" else "Switch Account / Sign Out"
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         // High-contrast road header card
@@ -107,8 +243,7 @@ fun DriverAppScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = myDriverProfile?.localizedName(language)
-                                ?: if (language == AppLanguage.AR) "بانتظار التفعيل من الإدارة" else "Awaiting Admin registration",
+                            text = myDriverProfile?.localizedName(language) ?: "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -131,40 +266,6 @@ fun DriverAppScreen(
                             checked = myDriverProfile.available,
                             onCheckedChange = { onToggleAvailability(myDriverProfile.id, it) },
                             modifier = Modifier.testTag("driver_availability_switch")
-                        )
-                    }
-                }
-            }
-        }
-
-        if (myDriverProfile == null && driversState is UiState.Success) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (language == AppLanguage.AR) "معرّف السائق (أرسله للإدارة):" else "Your Driver ID (share with Owner):",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = currentUserId,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    IconButton(onClick = { clipboard.setText(AnnotatedString(currentUserId)) }) {
-                        Icon(
-                            imageVector = Icons.Rounded.ContentCopy,
-                            contentDescription = "Copy Driver ID"
                         )
                     }
                 }

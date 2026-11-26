@@ -204,6 +204,7 @@ private fun AyaMarketAuthenticatedApp(
     val storeConfigState by viewModel.storeConfigState.collectAsStateWithLifecycle()
     val productsState by viewModel.productsState.collectAsStateWithLifecycle()
     val promosState by viewModel.promosState.collectAsStateWithLifecycle()
+    val customerProfileState by viewModel.customerProfileState.collectAsStateWithLifecycle()
     val addressesState by viewModel.addressesState.collectAsStateWithLifecycle()
     val customerOrdersState by viewModel.customerOrdersState.collectAsStateWithLifecycle()
     val driverOrdersState by viewModel.driverOrdersState.collectAsStateWithLifecycle()
@@ -217,6 +218,7 @@ private fun AyaMarketAuthenticatedApp(
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
 
     val storeConfig = (storeConfigState as? UiState.Success)?.data ?: StoreConfig()
+    val customerProfile = (customerProfileState as? UiState.Success)?.data
     val savedAddresses = (addressesState as? UiState.Success)?.data ?: emptyList()
     val products = (productsState as? UiState.Success)?.data ?: emptyList()
 
@@ -367,7 +369,8 @@ private fun AyaMarketAuthenticatedApp(
                                     cart = cart,
                                     pinnedLocation = pinnedLocation,
                                     savedAddresses = savedAddresses,
-                                    defaultCustomerName = displayName,
+                                    defaultCustomerName = customerProfile?.fullName?.ifBlank { displayName } ?: displayName,
+                                    defaultCustomerPhone = customerProfile?.phone ?: "",
                                     isBusy = isBusy,
                                     onAddToCart = viewModel::addToCart,
                                     onDecrementCart = viewModel::decrementFromCart,
@@ -418,16 +421,20 @@ private fun AyaMarketAuthenticatedApp(
                             onSavePromo = viewModel::savePromo,
                             onDeletePromo = viewModel::deletePromo,
                             onSaveDriver = viewModel::saveDriver,
+                            onDeleteDriver = viewModel::deleteDriver,
                             onSeedCatalog = viewModel::seedStarterStore
                         )
                         AppRole.DRIVER -> DriverAppScreen(
                             language = language,
                             currentUserId = uid,
+                            currentUserEmail = email,
                             driverOrdersState = driverOrdersState,
                             driversState = driversState,
+                            onClaimDriverUid = viewModel::claimDriverUid,
                             onToggleAvailability = viewModel::toggleDriverAvailability,
                             onMarkPickedUp = viewModel::driverMarkPickedUp,
-                            onConfirmDelivered = viewModel::driverConfirmDelivered
+                            onConfirmDelivered = viewModel::driverConfirmDelivered,
+                            onSignOut = { signOutUser(context, credentialManager, scope) }
                         )
                     }
                 }

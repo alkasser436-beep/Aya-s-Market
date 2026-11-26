@@ -74,6 +74,7 @@ fun CustomerCartCheckoutScreen(
     pinnedLocation: UserAddress,
     savedAddresses: List<UserAddress>,
     defaultCustomerName: String,
+    defaultCustomerPhone: String = "",
     isBusy: Boolean,
     onAddToCart: (Product, Int) -> Unit,
     onDecrementCart: (String) -> Unit,
@@ -96,7 +97,13 @@ fun CustomerCartCheckoutScreen(
     var step by remember { mutableIntStateOf(1) }
 
     var customerName by remember(defaultCustomerName) { mutableStateOf(defaultCustomerName.ifBlank { "Aya Shopper" }) }
-    var customerPhone by remember(pinnedLocation.phone) { mutableStateOf(pinnedLocation.phone.ifBlank { "+961 70 000 000" }) }
+    var customerPhone by remember(pinnedLocation.phone, defaultCustomerPhone) {
+        mutableStateOf(
+            defaultCustomerPhone.ifBlank {
+                pinnedLocation.phone.ifBlank { "+961 70 000 000" }
+            }
+        )
+    }
     var deliveryAddress by remember(pinnedLocation.addressLine, pinnedLocation.city) {
         mutableStateOf("${pinnedLocation.addressLine}, ${pinnedLocation.city}")
     }

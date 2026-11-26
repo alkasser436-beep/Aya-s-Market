@@ -7,6 +7,7 @@ import com.example.data.model.AppCurrency
 import com.example.data.model.AppLanguage
 import com.example.data.model.AppRole
 import com.example.data.model.CartItem
+import com.example.data.model.CustomerProfile
 import com.example.data.model.DriverProfile
 import com.example.data.model.Order
 import com.example.data.model.OrderItem
@@ -74,6 +75,13 @@ class AyaMarketViewModel(
             flowOf(UiState.Success(emptyList()))
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
 
+    val customerProfileState: StateFlow<UiState<CustomerProfile?>> =
+        if (initialRole == AppRole.CUSTOMER) {
+            repository.observeCustomerProfile(currentUserId).toUiState("customer_profile")
+        } else {
+            flowOf(UiState.Success(null))
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
+
     val addressesState: StateFlow<UiState<List<UserAddress>>> =
         if (initialRole == AppRole.CUSTOMER) {
             repository.observeAddresses(currentUserId).toUiState("addresses")
@@ -90,14 +98,14 @@ class AyaMarketViewModel(
 
     val driverOrdersState: StateFlow<UiState<List<Order>>> =
         if (initialRole == AppRole.DRIVER) {
-            repository.observeDriverOrders(currentUserId).toUiState("driver_orders")
+            repository.observeDriverOrders(currentUserId, currentUserEmail).toUiState("driver_orders")
         } else {
             flowOf(UiState.Success(emptyList()))
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
 
     val driversState: StateFlow<UiState<List<DriverProfile>>> =
         if (initialRole == AppRole.ADMIN || initialRole == AppRole.DRIVER) {
-            repository.observeDrivers(currentUserId, isAdminAuthorized).toUiState("drivers")
+            repository.observeDrivers(currentUserId, currentUserEmail, isAdminAuthorized).toUiState("drivers")
         } else {
             flowOf(UiState.Success(emptyList()))
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
@@ -213,6 +221,26 @@ class AyaMarketViewModel(
 
     fun toggleAdminSound() {
         _adminSoundEnabled.update { !it }
+    }
+
+    fun saveCustomerProfile(
+        fullName: String,
+        phone: String,
+        city: String,
+        defaultAddressLine: String = "",
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _isBusy.value = true
+            val res = repository.saveCustomerProfile(fullName, phone, city, defaultAddressLine)
+            _isBusy.value = false
+            res.onSuccess {
+                emitMsg(if (language.value == AppLanguage.AR) "تم حفظ بيانات الحساب بنجاح" else "Account profile saved")
+                onDone()
+            }.onFailure { err ->
+                emitMsg(err.localizedMessage ?: "Failed to save profile")
+            }
+        }
     }
 
     fun saveAddress(address: UserAddress, onSuccess: () -> Unit = {}) {
@@ -380,6 +408,16 @@ class AyaMarketViewModel(
         }
     }
 
+    fun deleteDriver(driverId: String) {
+        viewModelScope.launch {
+            repository.deleteDriver(driverId)
+                .onSuccess {
+                    emitMsg(if (language.value == AppLanguage.AR) "تم حذف السائق" else "Driver removed")
+                }
+                .onFailure { emitMsg(it.localizedMessage ?: "Failed to delete driver") }
+        }
+    }
+
     fun seedStarterStore() {
         viewModelScope.launch {
             _isBusy.value = true
@@ -394,6 +432,12 @@ class AyaMarketViewModel(
     }
 
     // --- Driver Actions ---
+    fun claimDriverUid(driverId: String) {
+        viewModelScope.launch {
+            repository.claimDriverUid(driverId)
+        }
+    }
+
     fun toggleDriverAvailability(driverId: String, available: Boolean) {
         viewModelScope.launch {
             repository.toggleDriverAvailability(driverId, available)

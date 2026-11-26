@@ -293,3 +293,167 @@ test("Orders lifecycle: Customer create -> Admin assign driver -> Driver pickup 
     })
   );
 });
+
+test("Customer user profile: strict per-user creation/update isolation", async () => {
+  const custDb = testEnv.authenticatedContext(CUSTOMER_UID, {
+    email: "ali@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const otherDb = testEnv.authenticatedContext(OTHER_UID, {
+    email: "sara@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const adminDb = adminContext().firestore();
+  const t0 = new Date(Date.now() - 2000);
+
+  await assertSucceeds(
+    custDb.collection("users").doc(CUSTOMER_UID).set({
+      uid: CUSTOMER_UID,
+      fullName: "Ali Hassan",
+      email: "ali@gmail.com",
+      phone: "+961 71 555 222",
+      city: "Beirut",
+      defaultAddressLine: "Hamra Street",
+      createdAt: t0,
+      updatedAt: t0,
+    })
+  );
+
+  await assertSucceeds(custDb.collection("users").doc(CUSTOMER_UID).get());
+  await assertSucceeds(adminDb.collection("users").doc(CUSTOMER_UID).get());
+  await assertFails(otherDb.collection("users").doc(CUSTOMER_UID).get());
+  await assertFails(
+    otherDb.collection("users").doc(CUSTOMER_UID).update({
+      phone: "+961 00 000 000",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+  await assertFails(
+    custDb.collection("users").doc(CUSTOMER_UID).update({
+      uid: OTHER_UID,
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+});
+
+test("Admin-only driver onboarding: email pre-registration, UID claim, and driverEmail order access", async () => {
+  const adminDb = adminContext().firestore();
+  const custDb = testEnv.authenticatedContext(CUSTOMER_UID, {
+    email: "ali@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const driverDb = testEnv.authenticatedContext(DRIVER_UID, {
+    email: "Driver.Rami@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const intruderDb = testEnv.authenticatedContext("intruder_1", {
+    email: "intruder@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const t0 = new Date(Date.now() - 5000);
+
+  // Non-admin cannot self-register as a driver
+  await assertFails(
+    intruderDb.collection("drivers").doc("drv_intruder").set({
+      uid: "intruder_1",
+      email: "intruder@gmail.com",
+      nameEn: "Intruder",
+      nameAr: "متطفل",
+      phone: "+961 70 111 111",
+      vehicleLabel: "Van",
+      available: true,
+      createdAt: t0,
+      updatedAt: t0,
+    })
+  );
+
+  // Admin registers driver by email before driver logs in (uid is "")
+  await assertSucceeds(
+    adminDb.collection("drivers").doc("drv_rami").set({
+      uid: "",
+      email: "driver.rami@gmail.com",
+      nameEn: "Rami Khoury",
+      nameAr: "رامي خوري",
+      phone: "+961 76 888 999",
+      vehicleLabel: "Scooter 12",
+      available: true,
+      createdAt: t0,
+      updatedAt: t0,
+    })
+  );
+
+  // Intruder cannot list driver's profile by email or claim it
+  await assertFails(intruderDb.collection("drivers").where("email", "==", "driver.rami@gmail.com").get());
+  await assertFails(
+    intruderDb.collection("drivers").doc("drv_rami").update({
+      uid: "intruder_1",
+      updatedAt: new Date(Date.now() - 4000),
+    })
+  );
+
+  // Driver queries own email roster entry & claims uid
+  await assertSucceeds(driverDb.collection("drivers").where("email", "==", "driver.rami@gmail.com").get());
+  await assertSucceeds(
+    driverDb.collection("drivers").doc("drv_rami").update({
+      uid: DRIVER_UID,
+      updatedAt: new Date(Date.now() - 3000),
+    })
+  );
+
+  // Driver can toggle availability after claiming uid, cannot tamper phone/email
+  await assertSucceeds(
+    driverDb.collection("drivers").doc("drv_rami").update({
+      available: false,
+      updatedAt: new Date(Date.now() - 2000),
+    })
+  );
+  await assertFails(
+    driverDb.collection("drivers").doc("drv_rami").update({
+      email: "hijacked@gmail.com",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Order assigned by driverEmail (with blank driverUid) is readable/updatable by verified driver email
+  await assertSucceeds(
+    custDb.collection("orders").doc("order_email_1").set({
+      customerUid: CUSTOMER_UID,
+      customerName: "Ali Hassan",
+      customerPhone: "+961 71 555 222",
+      deliveryAddress: "Hamra, Beirut",
+      latitude: 33.8963,
+      longitude: 35.4819,
+      currency: "USD",
+      exchangeRateAtOrder: 89500,
+      paymentMethod: "CASH_ON_DELIVERY",
+      subtotalUsd: 10.0,
+      deliveryFeeUsd: 2.0,
+      totalUsd: 12.0,
+      totalLbp: 1074000,
+      status: "PENDING",
+      items: [{ productId: "prod_tomato", nameEn: "Tomatoes", nameAr: "بندورة", quantity: 4, unitPriceUsd: 2.5 }],
+      cashCollected: false,
+      createdAt: t0,
+      updatedAt: t0,
+    })
+  );
+  await assertSucceeds(
+    adminDb.collection("orders").doc("order_email_1").update({
+      status: "PREPARING",
+      driverUid: "",
+      driverEmail: "driver.rami@gmail.com",
+      driverName: "Rami Khoury",
+      driverPhone: "+961 76 888 999",
+      updatedAt: new Date(Date.now() - 2500),
+    })
+  );
+  await assertSucceeds(driverDb.collection("orders").where("driverEmail", "==", "driver.rami@gmail.com").get());
+  await assertFails(intruderDb.collection("orders").where("driverEmail", "==", "driver.rami@gmail.com").get());
+  await assertSucceeds(
+    driverDb.collection("orders").doc("order_email_1").update({
+      status: "OUT_FOR_DELIVERY",
+      updatedAt: new Date(Date.now() - 1500),
+    })
+  );
+});
+

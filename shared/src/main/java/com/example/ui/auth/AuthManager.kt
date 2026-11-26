@@ -2,12 +2,14 @@ package com.example.ui.auth
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -25,6 +27,12 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 private const val TAG = "Auth"
+
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 fun isFirebaseReady(context: Context): Boolean {
     val appCtx = context.applicationContext
@@ -68,6 +76,7 @@ fun attemptAutoSignIn(
         onUnauthenticated()
         return
     }
+    val activity = context.findActivity() ?: context
     scope.launch {
         try {
             val googleIdOption = GetGoogleIdOption.Builder()
@@ -78,7 +87,7 @@ fun attemptAutoSignIn(
             val request = GetCredentialRequest.Builder()
                 .addCredentialOption(googleIdOption)
                 .build()
-            val result = credentialManager.getCredential(context, request)
+            val result = credentialManager.getCredential(activity, request)
             val cred = result.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
@@ -104,25 +113,40 @@ fun onGoogleSignInClicked(
     onAuthCancelled: () -> Unit = {}
 ) {
     if (!isFirebaseReady(context)) {
-        onAuthError("Firebase is not configured in this build (missing app/google-services.json).")
+        onAuthError("Firebase is not configured in this build (missing google-services.json).")
         return
     }
     val clientId = resolveWebClientId(context) ?: run {
-        onAuthError("Google Sign-In configuration missing: add app/google-services.json with default_web_client_id")
+        onAuthError("Google Sign-In configuration missing: add google-services.json with default_web_client_id")
         return
     }
-    val activity = context as? Activity
+    val activity = context.findActivity()
     if (activity == null) {
         onAuthError("Unable to launch Google Sign-In without an Activity context")
         return
     }
     scope.launch {
         try {
-            val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(signInOption)
-                .build()
-            val result = credentialManager.getCredential(activity, request)
+            val result = try {
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
+                credentialManager.getCredential(activity, request)
+            } catch (e: GetCredentialCancellationException) {
+                throw e
+            } catch (primaryErr: GetCredentialException) {
+                Log.w(TAG, "Primary SignInWithGoogle failed (${primaryErr.type}), trying GoogleId fallback", primaryErr)
+                val fallbackOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(fallbackOption)
+                    .build()
+                credentialManager.getCredential(activity, fallbackRequest)
+            }
             val cred = result.credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken

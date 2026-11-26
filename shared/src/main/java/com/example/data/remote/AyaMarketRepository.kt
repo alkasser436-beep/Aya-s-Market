@@ -3,6 +3,7 @@ package com.example.data.remote
 import android.content.Context
 import com.example.shared.R
 import com.example.data.model.AppCurrency
+import com.example.data.model.CustomerProfile
 import com.example.data.model.DriverProfile
 import com.example.data.model.Order
 import com.example.data.model.OrderItem
@@ -25,10 +26,12 @@ import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
 
 class AyaMarketRepository(
     private val db: FirebaseFirestore,
@@ -261,6 +264,83 @@ class AyaMarketRepository(
         }
     }
 
+    // --- Customer Account Profile (/users/{userId}) ---
+    fun observeCustomerProfile(userId: String): Flow<CustomerProfile?> = flow {
+        val uid = requireUserId()
+        check(uid == userId) { "User ID mismatch" }
+        val docRef = db.collection("users").document(userId)
+        emitAll(
+            docRef.snapshots()
+                .map { snapshot ->
+                    if (!snapshot.exists()) null
+                    else snapshot.toObject(
+                        CustomerProfile::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }
+                .catch { error ->
+                    logStreamError(error, OperationType.GET, docRef.path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveCustomerProfile(
+        fullName: String,
+        phone: String,
+        city: String,
+        defaultAddressLine: String = ""
+    ): Result<Unit> {
+        var path = "users"
+        return try {
+            val uid = requireUserId()
+            val email = auth.currentUser?.email?.trim()?.lowercase()?.takeIf { it.length >= 3 }
+                ?: "user_$uid@aya.local"
+            require(fullName.trim().length in 1..80) { "Full name required" }
+            require(phone.trim().length in 3..30) { "Phone required" }
+            require(city.trim().length in 1..60) { "City required" }
+
+            val docRef = db.collection("users").document(uid)
+            path = docRef.path
+            val existing = docRef.get().await()
+
+            val payload = mutableMapOf<String, Any?>(
+                "uid" to uid,
+                "fullName" to fullName.trim().take(80),
+                "email" to email.take(120),
+                "phone" to phone.trim().take(30),
+                "city" to city.trim().take(60),
+                "defaultAddressLine" to defaultAddressLine.trim().take(200).takeIf { it.isNotEmpty() },
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (!existing.exists()) {
+                payload["createdAt"] = FieldValue.serverTimestamp()
+                docRef.set(payload.filterValues { it != null }).await()
+            } else {
+                docRef.update(payload.filterValues { it != null }).await()
+            }
+
+            if (defaultAddressLine.trim().isNotEmpty() && !existing.exists()) {
+                saveAddress(
+                    uid,
+                    UserAddress(
+                        label = "Home",
+                        addressLine = defaultAddressLine.trim().take(200),
+                        city = city.trim().take(60),
+                        phone = phone.trim().take(30),
+                        defaultAddress = true
+                    )
+                )
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
     // --- Saved Addresses (User-scoped PII) ---
     fun observeAddresses(userId: String): Flow<List<UserAddress>> = flow {
         val uid = requireUserId()
@@ -339,45 +419,88 @@ class AyaMarketRepository(
     }
 
     // --- Drivers ---
-    fun observeDrivers(userId: String, isAdmin: Boolean): Flow<List<DriverProfile>> = flow {
+    fun observeDrivers(userId: String, userEmail: String, isAdmin: Boolean): Flow<List<DriverProfile>> = flow {
         val uid = requireUserId()
         val path = "drivers"
-        val query: Query = if (isAdmin) {
-            db.collection(path)
+        val normalizedEmail = userEmail.trim().lowercase()
+        if (isAdmin) {
+            emitAll(
+                db.collection(path)
+                    .snapshots()
+                    .map { snapshot ->
+                        snapshot.toObjects(
+                            DriverProfile::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    }
+                    .catch { error ->
+                        logStreamError(error, OperationType.LIST, path, uid)
+                        throw error
+                    }
+            )
         } else {
-            db.collection(path).whereEqualTo("uid", userId)
-        }
-        emitAll(
-            query.snapshots()
+            val byUidFlow = db.collection(path)
+                .whereEqualTo("uid", userId)
+                .snapshots()
                 .map { snapshot ->
                     snapshot.toObjects(
                         DriverProfile::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
                     )
                 }
-                .catch { error ->
-                    logStreamError(error, OperationType.LIST, path, uid)
-                    throw error
-                }
-        )
+            if (normalizedEmail.isNotBlank()) {
+                val byEmailFlow = db.collection(path)
+                    .whereEqualTo("email", normalizedEmail)
+                    .snapshots()
+                    .map { snapshot ->
+                        snapshot.toObjects(
+                            DriverProfile::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    }
+                emitAll(
+                    combine(byUidFlow, byEmailFlow) { a, b ->
+                        (a + b).distinctBy { it.id }
+                    }.catch { error ->
+                        logStreamError(error, OperationType.LIST, path, uid)
+                        throw error
+                    }
+                )
+            } else {
+                emitAll(
+                    byUidFlow.catch { error ->
+                        logStreamError(error, OperationType.LIST, path, uid)
+                        throw error
+                    }
+                )
+            }
+        }
     }
 
     suspend fun saveDriver(driver: DriverProfile): Result<Unit> {
         var path = "drivers"
         return try {
             requireUserId()
-            require(driver.uid.trim().length in 1..128) { "Driver UID required" }
+            val normalizedUid = driver.uid.trim().take(128)
+            val normalizedEmail = driver.email.trim().lowercase().take(120)
+            require(normalizedUid.isNotEmpty() || normalizedEmail.length >= 3) {
+                "Driver Email or Auth UID is required"
+            }
             require(driver.nameEn.trim().length in 1..80) { "Driver Name EN required" }
             require(driver.nameAr.trim().length in 1..80) { "Driver Name AR required" }
             require(driver.phone.trim().length in 3..30) { "Driver phone required" }
 
-            val docId = driver.id.ifBlank { driver.uid.trim() }
+            val docId = driver.id.ifBlank {
+                if (normalizedUid.isNotEmpty()) normalizedUid
+                else "drv_" + sha256Hex(normalizedEmail).take(40)
+            }
             val docRef = db.collection("drivers").document(docId)
             path = docRef.path
             val existingSnap = docRef.get().await()
 
             val payload = mutableMapOf<String, Any?>(
-                "uid" to driver.uid.trim().take(128),
+                "uid" to normalizedUid,
+                "email" to normalizedEmail.takeIf { it.isNotEmpty() },
                 "nameEn" to driver.nameEn.trim().take(80),
                 "nameAr" to driver.nameAr.trim().take(80),
                 "phone" to driver.phone.trim().take(30),
@@ -396,6 +519,39 @@ class AyaMarketRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteDriver(driverId: String): Result<Unit> {
+        val path = "drivers/$driverId"
+        return try {
+            requireUserId()
+            db.collection("drivers").document(driverId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun claimDriverUid(driverId: String): Result<Unit> {
+        val path = "drivers/$driverId"
+        return try {
+            val uid = requireUserId()
+            db.collection("drivers").document(driverId).update(
+                mapOf(
+                    "uid" to uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
             Result.failure(e)
         }
     }
@@ -441,25 +597,49 @@ class AyaMarketRepository(
         )
     }
 
-    fun observeDriverOrders(driverUid: String): Flow<List<Order>> = flow {
+    fun observeDriverOrders(driverUid: String, driverEmail: String): Flow<List<Order>> = flow {
         val uid = requireUserId()
         check(uid == driverUid)
         val path = "orders"
-        emitAll(
-            db.collection(path)
-                .whereEqualTo("driverUid", driverUid)
+        val normalizedEmail = driverEmail.trim().lowercase()
+        val byUidFlow = db.collection(path)
+            .whereEqualTo("driverUid", driverUid)
+            .snapshots()
+            .map { snapshot ->
+                snapshot.toObjects(
+                    Order::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+            }
+        if (normalizedEmail.isNotBlank()) {
+            val byEmailFlow = db.collection(path)
+                .whereEqualTo("driverEmail", normalizedEmail)
                 .snapshots()
                 .map { snapshot ->
                     snapshot.toObjects(
                         Order::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
+                    )
                 }
-                .catch { error ->
+            emitAll(
+                combine(byUidFlow, byEmailFlow) { a, b ->
+                    (a + b).distinctBy { it.id }
+                        .sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
+                }.catch { error ->
                     logStreamError(error, OperationType.LIST, path, uid)
                     throw error
                 }
-        )
+            )
+        } else {
+            emitAll(
+                byUidFlow
+                    .map { list -> list.sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE } }
+                    .catch { error ->
+                        logStreamError(error, OperationType.LIST, path, uid)
+                        throw error
+                    }
+            )
+        }
     }
 
     fun observeAllOrdersForAdmin(): Flow<List<Order>> = flow {
@@ -565,15 +745,18 @@ class AyaMarketRepository(
         val path = "orders/$orderId"
         return try {
             requireUserId()
-            db.collection("orders").document(orderId).update(
-                mapOf(
-                    "driverUid" to driver.uid,
-                    "driverName" to driver.nameEn,
-                    "driverPhone" to driver.phone,
-                    "status" to OrderStatus.PREPARING.name,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val payload = mutableMapOf<String, Any>(
+                "driverUid" to driver.uid,
+                "driverName" to driver.nameEn,
+                "driverPhone" to driver.phone,
+                "status" to OrderStatus.PREPARING.name,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            val normalizedEmail = driver.email.trim().lowercase()
+            if (normalizedEmail.isNotEmpty()) {
+                payload["driverEmail"] = normalizedEmail.take(120)
+            }
+            db.collection("orders").document(orderId).update(payload).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -886,18 +1069,22 @@ class AyaMarketRepository(
             )
 
             // Register current admin as an active test driver too so Driver Mode works immediately
+            val ownerDriverPayload = mutableMapOf<String, Any>(
+                "uid" to uid,
+                "nameEn" to (currentUser.displayName ?: "Aya Express Driver"),
+                "nameAr" to (currentUser.displayName ?: "سائق أيا إكسبرس"),
+                "phone" to "+961 70 888 436",
+                "vehicleLabel" to "Green Van #01",
+                "available" to true,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            currentUser.email?.trim()?.lowercase()?.takeIf { it.length >= 3 }?.let {
+                ownerDriverPayload["email"] = it.take(120)
+            }
             batch.set(
                 db.collection("drivers").document(uid),
-                mapOf(
-                    "uid" to uid,
-                    "nameEn" to (currentUser.displayName ?: "Aya Express Driver"),
-                    "nameAr" to (currentUser.displayName ?: "سائق أيا إكسبرس"),
-                    "phone" to "+961 70 888 436",
-                    "vehicleLabel" to "Green Van #01",
-                    "available" to true,
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
+                ownerDriverPayload
             )
 
             batch.commit().await()
@@ -908,6 +1095,11 @@ class AyaMarketRepository(
             handleFirestoreError(e, OperationType.WRITE, path)
             Result.failure(e)
         }
+    }
+
+    private fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun logStreamError(

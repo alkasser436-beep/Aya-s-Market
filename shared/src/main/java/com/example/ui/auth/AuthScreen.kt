@@ -19,15 +19,20 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.CurrencyExchange
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.LocalShipping
+import androidx.compose.material.icons.rounded.LocationCity
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Payments
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.ShoppingBasket
@@ -42,8 +47,10 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,10 +69,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import kotlinx.coroutines.launch
 import com.example.shared.R
 import com.example.data.model.AppLanguage
 import com.example.data.model.AppRole
@@ -88,6 +96,11 @@ fun AuthScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isSignUpMode by remember(appRole) { mutableStateOf(false) }
+    var fullName by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var city by remember { mutableStateOf("") }
+    var addressLine by remember { mutableStateOf("") }
 
     LaunchedEffect(appRole, firebaseReady) {
         if (!firebaseReady) return@LaunchedEffect
@@ -295,13 +308,13 @@ fun AuthScreen(
                                         else
                                             "Standalone Admin app locked strictly to authorized store owner Google accounts."
                                         AppRole.DRIVER -> if (language == AppLanguage.AR)
-                                            "تطبيق السائق المستقل لاستلام الطلبات وتحديث حالة التوصيل وتحصيل الدفعات."
+                                            "تطبيق السائق مستقل ومخصص للسائقين المضافين من قِبل الإدارة فقط."
                                         else
-                                            "Standalone Driver app for assigned deliveries, GPS navigation, and cash collection."
+                                            "Standalone Driver app reserved strictly for drivers added by the Store Admin."
                                         AppRole.CUSTOMER -> if (language == AppLanguage.AR)
-                                            "تطبيق المتسوق المستقل لطلب المنتجات الطازجة بالدولار والليرة اللبنانية."
+                                            "سجّل الدخول بحسابك أو أنشئ حساب زبون جديد للتسوق بالدولار والليرة."
                                         else
-                                            "Standalone Customer store app for fresh groceries in USD & LBP."
+                                            "Sign in or create a new customer account to shop in USD & LBP."
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Medium,
@@ -314,61 +327,170 @@ fun AuthScreen(
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            when (appRole) {
-                                AppRole.CUSTOMER -> {
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.ShoppingBasket,
-                                        label = if (language == AppLanguage.AR) "ليرة ودولار" else "USD & LBP",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.QrCodeScanner,
-                                        label = if (language == AppLanguage.AR) "ماسح باركود" else "Barcode Scan",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.Map,
-                                        label = if (language == AppLanguage.AR) "تحديد الموقع" else "GPS Pinning",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                AppRole.ADMIN -> {
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.CurrencyExchange,
-                                        label = if (language == AppLanguage.AR) "سعر الصرف" else "Live Rate",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.Inventory2,
-                                        label = if (language == AppLanguage.AR) "إدارة المخزون" else "Inventory",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.ReceiptLong,
-                                        label = if (language == AppLanguage.AR) "طباعة فواتير" else "Print Invoices",
-                                        modifier = Modifier.weight(1f)
+                        if (appRole == AppRole.CUSTOMER) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val signInLabel = if (language == AppLanguage.AR) "تسجيل الدخول" else "Sign In"
+                                val signUpLabel = if (language == AppLanguage.AR) "إنشاء حساب" else "Create Account"
+
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            isSignUpMode = false
+                                            errorMessage = null
+                                        }
+                                        .testTag("auth_mode_signin"),
+                                    color = if (!isSignUpMode) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        text = signInLabel,
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (!isSignUpMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 10.dp)
                                     )
                                 }
-                                AppRole.DRIVER -> {
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.LocalShipping,
-                                        label = if (language == AppLanguage.AR) "طلبات فورية" else "Live Tasks",
-                                        modifier = Modifier.weight(1f)
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            isSignUpMode = true
+                                            errorMessage = null
+                                        }
+                                        .testTag("auth_mode_signup"),
+                                    color = if (isSignUpMode) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                        text = signUpLabel,
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSignUpMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 10.dp)
                                     )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.Map,
-                                        label = if (language == AppLanguage.AR) "خرائط وويز" else "Maps & Waze",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    RolePillPreview(
-                                        icon = Icons.Rounded.Payments,
-                                        label = if (language == AppLanguage.AR) "تأكيد التحصيل" else "Cash Collect",
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                }
+                            }
+                        }
+
+                        if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedTextField(
+                                    value = fullName,
+                                    onValueChange = { fullName = it },
+                                    label = { Text(if (language == AppLanguage.AR) "الاسم الكامل" else "Full Name") },
+                                    leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("signup_name_input")
+                                )
+                                OutlinedTextField(
+                                    value = phone,
+                                    onValueChange = { phone = it },
+                                    label = { Text(if (language == AppLanguage.AR) "رقم الهاتف" else "Phone Number") },
+                                    placeholder = { Text("+961 71 123 456") },
+                                    leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("signup_phone_input")
+                                )
+                                OutlinedTextField(
+                                    value = city,
+                                    onValueChange = { city = it },
+                                    label = { Text(if (language == AppLanguage.AR) "المدينة / المنطقة" else "City / Area") },
+                                    placeholder = { Text(if (language == AppLanguage.AR) "بيروت" else "Beirut") },
+                                    leadingIcon = { Icon(Icons.Rounded.LocationCity, contentDescription = null) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("signup_city_input")
+                                )
+                                OutlinedTextField(
+                                    value = addressLine,
+                                    onValueChange = { addressLine = it },
+                                    label = { Text(if (language == AppLanguage.AR) "العنوان التفصيلي (اختياري)" else "Street Address (Optional)") },
+                                    leadingIcon = { Icon(Icons.Rounded.Home, contentDescription = null) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("signup_address_input")
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                when (appRole) {
+                                    AppRole.CUSTOMER -> {
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.ShoppingBasket,
+                                            label = if (language == AppLanguage.AR) "ليرة ودولار" else "USD & LBP",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.QrCodeScanner,
+                                            label = if (language == AppLanguage.AR) "ماسح باركود" else "Barcode Scan",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.Map,
+                                            label = if (language == AppLanguage.AR) "تحديد الموقع" else "GPS Pinning",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    AppRole.ADMIN -> {
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.CurrencyExchange,
+                                            label = if (language == AppLanguage.AR) "سعر الصرف" else "Live Rate",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.Inventory2,
+                                            label = if (language == AppLanguage.AR) "إدارة المخزون" else "Inventory",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.ReceiptLong,
+                                            label = if (language == AppLanguage.AR) "طباعة فواتير" else "Print Invoices",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    AppRole.DRIVER -> {
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.LocalShipping,
+                                            label = if (language == AppLanguage.AR) "طلبات فورية" else "Live Tasks",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.Map,
+                                            label = if (language == AppLanguage.AR) "خرائط وويز" else "Maps & Waze",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RolePillPreview(
+                                            icon = Icons.Rounded.Payments,
+                                            label = if (language == AppLanguage.AR) "تأكيد التحصيل" else "Cash Collect",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -409,43 +531,93 @@ fun AuthScreen(
                             }
                         }
 
+                        val launchGoogleAuth = {
+                            val startSignIn = {
+                                onGoogleSignInClicked(
+                                    context = context,
+                                    credentialManager = credentialManager,
+                                    onAuthSuccess = {
+                                        val user = safeCurrentFirebaseUser(context)
+                                        if (appRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
+                                            isLoading = false
+                                            val attempted = user?.email ?: ""
+                                            signOutUser(context, credentialManager, scope) {
+                                                errorMessage = if (language == AppLanguage.AR)
+                                                    "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحساب مالك المتجر فقط."
+                                                else
+                                                    "Access denied ($attempted): Admin app is locked to the authorized store owner account only."
+                                            }
+                                        } else if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                                            scope.launch {
+                                                val repo = AyaMarketRepository(context)
+                                                val res = repo.saveCustomerProfile(
+                                                    fullName = fullName,
+                                                    phone = phone,
+                                                    city = city,
+                                                    defaultAddressLine = addressLine
+                                                )
+                                                isLoading = false
+                                                res.onSuccess {
+                                                    onAuthSuccess()
+                                                }.onFailure { err ->
+                                                    errorMessage = err.localizedMessage ?: "Failed to save account profile"
+                                                }
+                                            }
+                                        } else {
+                                            isLoading = false
+                                            onAuthSuccess()
+                                        }
+                                    },
+                                    onAuthError = { msg ->
+                                        isLoading = false
+                                        errorMessage = msg
+                                    },
+                                    scope = scope,
+                                    onAuthCancelled = {
+                                        isLoading = false
+                                        errorMessage = if (language == AppLanguage.AR) {
+                                            "لم يكتمل اختيار حساب Google. تأكد من وجود حساب Google مسجل في جهازك وحاول مرة أخرى."
+                                        } else {
+                                            "Google account selection was cancelled. Ensure a Google account is added on your device and try again."
+                                        }
+                                    }
+                                )
+                            }
+
+                            if (safeCurrentFirebaseUser(context) != null) {
+                                signOutUser(context, credentialManager, scope) {
+                                    startSignIn()
+                                }
+                            } else {
+                                startSignIn()
+                            }
+                        }
+
                         Button(
                             onClick = {
                                 errorMessage = null
-                                isLoading = true
-                                signOutUser(context, credentialManager, scope) {
-                                    onGoogleSignInClicked(
-                                        context = context,
-                                        credentialManager = credentialManager,
-                                        onAuthSuccess = {
-                                            isLoading = false
-                                            val user = safeCurrentFirebaseUser(context)
-                                            if (appRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
-                                                val attempted = user?.email ?: ""
-                                                signOutUser(context, credentialManager, scope) {
-                                                    errorMessage = if (language == AppLanguage.AR)
-                                                        "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحسابات مالك المتجر فقط."
-                                                    else
-                                                        "Access denied ($attempted): Admin app is locked to authorized store owner accounts only."
-                                                }
-                                            } else {
-                                                onAuthSuccess()
-                                            }
-                                        },
-                                        onAuthError = { msg ->
-                                            isLoading = false
-                                            errorMessage = msg
-                                        },
-                                        scope = scope,
-                                        onAuthCancelled = { isLoading = false }
-                                    )
+                                if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                                    if (fullName.trim().length < 2) {
+                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال الاسم الكامل" else "Please enter your full name"
+                                        return@Button
+                                    }
+                                    if (phone.trim().length < 6) {
+                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال رقم هاتف صحيح" else "Please enter a valid phone number"
+                                        return@Button
+                                    }
+                                    if (city.trim().length < 2) {
+                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال المدينة أو المنطقة" else "Please enter your city or area"
+                                        return@Button
+                                    }
                                 }
+                                isLoading = true
+                                launchGoogleAuth()
                             },
                             enabled = firebaseReady && !isLoading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(54.dp)
-                                .testTag("google_sign_in_button"),
+                                .testTag(if (appRole == AppRole.CUSTOMER && isSignUpMode) "create_account_button" else "google_sign_in_button"),
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = when (appRole) {
@@ -462,12 +634,35 @@ fun AuthScreen(
                                     strokeWidth = 2.5.dp
                                 )
                             } else {
+                                if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                                    Icon(Icons.Rounded.PersonAdd, contentDescription = null, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 Text(
-                                    text = when (appRole) {
-                                        AppRole.ADMIN -> if (language == AppLanguage.AR) "تسجيل دخول المالك عبر Google" else "Owner Sign in with Google"
+                                    text = when {
+                                        appRole == AppRole.ADMIN -> if (language == AppLanguage.AR) "تسجيل دخول المالك عبر Google" else "Owner Sign in with Google"
+                                        appRole == AppRole.CUSTOMER && isSignUpMode -> if (language == AppLanguage.AR) "إنشاء حساب عبر Google" else "Create Account with Google"
                                         else -> AppStrings.signInWithGoogle(language)
                                     },
                                     style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                        }
+
+                        if (appRole == AppRole.CUSTOMER) {
+                            TextButton(
+                                onClick = {
+                                    isSignUpMode = !isSignUpMode
+                                    errorMessage = null
+                                },
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Text(
+                                    text = if (isSignUpMode) {
+                                        if (language == AppLanguage.AR) "لديك حساب بالفعل؟ سجّل الدخول" else "Already have an account? Sign In"
+                                    } else {
+                                        if (language == AppLanguage.AR) "مستخدم جديد؟ أنشئ حساب زبون جديد" else "New customer? Create a new account"
+                                    }
                                 )
                             }
                         }

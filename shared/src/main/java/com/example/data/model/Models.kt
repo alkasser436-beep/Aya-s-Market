@@ -147,9 +147,24 @@ data class UserAddress(
 
 @Keep
 @IgnoreExtraProperties
+data class CustomerProfile(
+    @DocumentId val id: String = "",
+    val uid: String = "",
+    val fullName: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val city: String = "Beirut",
+    val defaultAddressLine: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
 data class DriverProfile(
     @DocumentId val id: String = "",
     val uid: String = "",
+    val email: String = "",
     val nameEn: String = "",
     val nameAr: String = "",
     val phone: String = "",
@@ -204,6 +219,7 @@ data class Order(
     val status: String = OrderStatus.PENDING.name,
     val items: List<OrderItem> = emptyList(),
     val driverUid: String = "",
+    val driverEmail: String = "",
     val driverName: String = "",
     val driverPhone: String = "",
     val cashCollected: Boolean = false,

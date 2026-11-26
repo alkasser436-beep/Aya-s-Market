@@ -110,6 +110,7 @@ fun AdminDashboardScreen(
     onSavePromo: (PromoBanner, () -> Unit) -> Unit,
     onDeletePromo: (String) -> Unit,
     onSaveDriver: (DriverProfile, () -> Unit) -> Unit,
+    onDeleteDriver: (String) -> Unit = {},
     onSeedCatalog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -172,6 +173,7 @@ fun AdminDashboardScreen(
     var showNewProductDialog by remember { mutableStateOf(false) }
     var showNewPromoDialog by remember { mutableStateOf(false) }
     var showNewDriverDialog by remember { mutableStateOf(false) }
+    var editingDriver by remember { mutableStateOf<DriverProfile?>(null) }
 
     // Compute Analytics
     val validOrders = orders.filter { it.parsedStatus != OrderStatus.CANCELLED }
@@ -504,7 +506,23 @@ fun AdminDashboardScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(driver.localizedName(language), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    if (driver.email.isNotBlank()) {
+                                        Text(
+                                            text = driver.email,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                     Text("${driver.phone} • ${driver.vehicleLabel}", style = MaterialTheme.typography.bodySmall)
+                                    Text(
+                                        text = if (driver.uid.isNotBlank()) {
+                                            if (language == AppLanguage.AR) "الحساب مفعّل للتوصيل" else "Account linked"
+                                        } else {
+                                            if (language == AppLanguage.AR) "بانتظار تسجيل دخول السائق" else "Pending driver's first login"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                                 Surface(
                                     color = if (driver.available) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
@@ -519,6 +537,12 @@ fun AdminDashboardScreen(
                                         style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                     )
+                                }
+                                IconButton(onClick = { editingDriver = driver }) {
+                                    Icon(Icons.Rounded.Edit, contentDescription = "Edit driver")
+                                }
+                                IconButton(onClick = { onDeleteDriver(driver.id) }) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete driver", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }
@@ -568,14 +592,19 @@ fun AdminDashboardScreen(
         )
     }
 
-    if (showNewDriverDialog) {
+    if (showNewDriverDialog || editingDriver != null) {
         DriverEditorDialog(
             language = language,
-            defaultUid = currentUserId,
-            defaultName = currentUserName,
-            onDismiss = { showNewDriverDialog = false },
+            initial = editingDriver,
+            onDismiss = {
+                showNewDriverDialog = false
+                editingDriver = null
+            },
             onSave = { driver ->
-                onSaveDriver(driver) { showNewDriverDialog = false }
+                onSaveDriver(driver) {
+                    showNewDriverDialog = false
+                    editingDriver = null
+                }
             }
         )
     }
@@ -909,43 +938,109 @@ private fun PromoEditorDialog(
 @Composable
 private fun DriverEditorDialog(
     language: AppLanguage,
-    defaultUid: String,
-    defaultName: String,
+    initial: DriverProfile?,
     onDismiss: () -> Unit,
     onSave: (DriverProfile) -> Unit
 ) {
-    var uid by remember { mutableStateOf(defaultUid) }
-    var nameEn by remember { mutableStateOf(defaultName.ifBlank { "Aya Driver" }) }
-    var nameAr by remember { mutableStateOf(defaultName.ifBlank { "سائق أيا" }) }
-    var phone by remember { mutableStateOf("+961 70 888 436") }
-    var vehicle by remember { mutableStateOf("Delivery Scooter #1") }
+    var email by remember { mutableStateOf(initial?.email ?: "") }
+    var uid by remember { mutableStateOf(initial?.uid ?: "") }
+    var nameEn by remember { mutableStateOf(initial?.nameEn ?: "") }
+    var nameAr by remember { mutableStateOf(initial?.nameAr ?: "") }
+    var phone by remember { mutableStateOf(initial?.phone ?: "+961 70 ") }
+    var vehicle by remember { mutableStateOf(initial?.vehicleLabel ?: "Delivery Scooter #1") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (language == AppLanguage.AR) "تسجيل سائق توصيل" else "Register Delivery Driver", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                OutlinedTextField(value = uid, onValueChange = { uid = it }, label = { Text("Driver Auth UID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = nameEn, onValueChange = { nameEn = it }, label = { Text("Name EN") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = nameAr, onValueChange = { nameAr = it }, label = { Text("الاسم AR") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = vehicle, onValueChange = { vehicle = it }, label = { Text("Vehicle") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (initial == null) {
+                        if (language == AppLanguage.AR) "إضافة سائق توصيل جديد" else "Add Delivery Driver"
+                    } else {
+                        if (language == AppLanguage.AR) "تعديل بيانات السائق" else "Edit Delivery Driver"
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "أدخل بريد Google الخاص بالسائق ليتمكن من تسجيل الدخول في تطبيق السائق واستلام الطلبات."
+                    else
+                        "Enter the driver's Google email so they can sign in to Aya Driver and receive orders.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text(if (language == AppLanguage.AR) "بريد السائق (Google Email)" else "Driver Google Email") },
+                    placeholder = { Text("driver@gmail.com") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = nameAr,
+                    onValueChange = { nameAr = it },
+                    label = { Text(if (language == AppLanguage.AR) "اسم السائق (عربي)" else "Driver Name (AR)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = nameEn,
+                    onValueChange = { nameEn = it },
+                    label = { Text(if (language == AppLanguage.AR) "اسم السائق (إنجليزي)" else "Driver Name (EN)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text(if (language == AppLanguage.AR) "رقم الهاتف" else "Phone") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = vehicle,
+                    onValueChange = { vehicle = it },
+                    label = { Text(if (language == AppLanguage.AR) "المركبة" else "Vehicle") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = uid,
+                    onValueChange = { uid = it },
+                    label = { Text(if (language == AppLanguage.AR) "Auth UID (اختياري — يُربط تلقائياً)" else "Auth UID (Optional — auto-linked)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(AppStrings.back(language)) }
                     Button(
                         onClick = {
+                            val resolvedNameEn = nameEn.trim().ifBlank { nameAr.trim() }
+                            val resolvedNameAr = nameAr.trim().ifBlank { resolvedNameEn }
                             onSave(
                                 DriverProfile(
-                                    id = uid.trim(),
+                                    id = initial?.id ?: "",
                                     uid = uid.trim(),
-                                    nameEn = nameEn,
-                                    nameAr = nameAr.ifBlank { nameEn },
-                                    phone = phone,
-                                    vehicleLabel = vehicle,
-                                    available = true
+                                    email = email.trim().lowercase(),
+                                    nameEn = resolvedNameEn,
+                                    nameAr = resolvedNameAr,
+                                    phone = phone.trim(),
+                                    vehicleLabel = vehicle.trim(),
+                                    available = initial?.available ?: true
                                 )
                             )
                         },
-                        enabled = uid.isNotBlank() && nameEn.isNotBlank() && phone.isNotBlank(),
+                        enabled = (email.trim().contains("@") || uid.isNotBlank()) &&
+                            (nameEn.isNotBlank() || nameAr.isNotBlank()) &&
+                            phone.trim().length >= 3,
                         modifier = Modifier.weight(1f)
                     ) { Text(if (language == AppLanguage.AR) "حفظ" else "Save") }
                 }

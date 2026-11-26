@@ -41,6 +41,16 @@ service cloud.firestore {
       return ts is timestamp && ts <= request.time;
     }
 
+    function verifiedEmailMatches(docEmail) {
+      return isSignedIn() &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email_verified == true &&
+        'email' in request.auth.token &&
+        docEmail is string &&
+        docEmail.size() > 0 &&
+        docEmail == request.auth.token.email.lower();
+    }
+
     function isValidCategory(cat) {
       return cat in ['FRUITS_VEG', 'DAIRY', 'BAKERY', 'BEVERAGES', 'HOUSEHOLD'];
     }
@@ -133,10 +143,25 @@ service cloud.firestore {
         isValidTimestamp(data.updatedAt);
     }
 
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'phone', 'city', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'fullName', 'email', 'phone', 'city', 'defaultAddressLine', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 80 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
+        data.city is string && data.city.size() >= 1 && data.city.size() <= 60 &&
+        (!('defaultAddressLine' in data) || (data.defaultAddressLine is string && data.defaultAddressLine.size() <= 200)) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
     function isValidDriver(data) {
       return data.keys().hasAll(['uid', 'nameEn', 'nameAr', 'phone', 'available', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'nameEn', 'nameAr', 'phone', 'vehicleLabel', 'available', 'createdAt', 'updatedAt']) &&
-        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.keys().hasOnly(['uid', 'email', 'nameEn', 'nameAr', 'phone', 'vehicleLabel', 'available', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() <= 128 &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+        (data.uid.size() >= 1 || ('email' in data && data.email.size() >= 3)) &&
         data.nameEn is string && data.nameEn.size() >= 1 && data.nameEn.size() <= 80 &&
         data.nameAr is string && data.nameAr.size() >= 1 && data.nameAr.size() <= 80 &&
         data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 30 &&
@@ -157,7 +182,7 @@ service cloud.firestore {
           'customerUid', 'customerName', 'customerPhone', 'deliveryAddress',
           'deliveryNotes', 'latitude', 'longitude', 'currency', 'exchangeRateAtOrder',
           'paymentMethod', 'subtotalUsd', 'deliveryFeeUsd', 'totalUsd', 'totalLbp',
-          'status', 'items', 'driverUid', 'driverName', 'driverPhone',
+          'status', 'items', 'driverUid', 'driverEmail', 'driverName', 'driverPhone',
           'cashCollected', 'createdAt', 'updatedAt'
         ]) &&
         data.customerUid is string && data.customerUid.size() >= 1 && data.customerUid.size() <= 128 &&
@@ -177,6 +202,7 @@ service cloud.firestore {
         data.status in ['PENDING', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'] &&
         data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map &&
         (!('driverUid' in data) || (data.driverUid is string && data.driverUid.size() <= 128)) &&
+        (!('driverEmail' in data) || (data.driverEmail is string && data.driverEmail.size() <= 120)) &&
         (!('driverName' in data) || (data.driverName is string && data.driverName.size() <= 80)) &&
         (!('driverPhone' in data) || (data.driverPhone is string && data.driverPhone.size() <= 30)) &&
         data.cashCollected is bool &&
@@ -210,6 +236,16 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(promoId);
     }
 
+    // Customer Account Profile (Strict per-user ownership)
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidId(userId);
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) &&
+                       isValidUserProfile(incoming()) && incoming().uid == request.auth.uid;
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidId(userId) &&
+                       isValidUserProfile(incoming()) && incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt;
+    }
+
     // Customer Saved Delivery Addresses (Strict PII isolation)
     match /users/{userId}/addresses/{addressId} {
       allow get: if isSignedIn() && request.auth.uid == userId && isValidId(addressId);
@@ -220,17 +256,32 @@ service cloud.firestore {
       allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(addressId);
     }
 
-    // Delivery Driver Roster
+    // Delivery Driver Roster (Added & managed strictly by Admin)
     match /drivers/{driverId} {
-      allow get: if isSignedIn() && isValidId(driverId) && (isAdmin() || request.auth.uid == driverId || existing().uid == request.auth.uid);
-      allow list: if isBootstrappedAdmin() || (isSignedIn() && existing().uid == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(driverId) && (
+        isAdmin() ||
+        request.auth.uid == driverId ||
+        existing().uid == request.auth.uid ||
+        ('email' in existing() && verifiedEmailMatches(existing().email))
+      );
+      allow list: if isBootstrappedAdmin() || (
+        isSignedIn() && (
+          existing().uid == request.auth.uid ||
+          ('email' in existing() && verifiedEmailMatches(existing().email))
+        )
+      );
       allow create: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
       allow update: if isSignedIn() && isValidId(driverId) && isValidDriver(incoming()) &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().uid == existing().uid && (
+                       incoming().createdAt == existing().createdAt && (
                          isAdmin() ||
                          (existing().uid == request.auth.uid &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['available', 'updatedAt']))
+                          incoming().uid == existing().uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['available', 'updatedAt'])) ||
+                         (existing().uid == '' &&
+                          incoming().uid == request.auth.uid &&
+                          'email' in existing() &&
+                          verifiedEmailMatches(existing().email) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['uid', 'updatedAt']))
                        );
       allow delete: if isAdmin() && isValidId(driverId);
     }
@@ -240,25 +291,29 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(orderId) && (
         isAdmin() ||
         existing().customerUid == request.auth.uid ||
-        existing().driverUid == request.auth.uid
+        existing().driverUid == request.auth.uid ||
+        ('driverEmail' in existing() && verifiedEmailMatches(existing().driverEmail))
       );
       allow list: if isBootstrappedAdmin() || (
         isSignedIn() && (
           existing().customerUid == request.auth.uid ||
-          existing().driverUid == request.auth.uid
+          existing().driverUid == request.auth.uid ||
+          ('driverEmail' in existing() && verifiedEmailMatches(existing().driverEmail))
         )
       );
       allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) &&
                        incoming().customerUid == request.auth.uid &&
                        incoming().status == 'PENDING' &&
                        incoming().cashCollected == false &&
-                       (!('driverUid' in incoming()) || incoming().driverUid == '');
+                       (!('driverUid' in incoming()) || incoming().driverUid == '') &&
+                       (!('driverEmail' in incoming()) || incoming().driverEmail == '');
       allow update: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) &&
                        incoming().customerUid == existing().customerUid &&
                        incoming().createdAt == existing().createdAt && (
                          isAdmin() ||
                          (existing().status != 'DELIVERED' && existing().status != 'CANCELLED' &&
-                          existing().driverUid == request.auth.uid && (
+                          (existing().driverUid == request.auth.uid ||
+                           ('driverEmail' in existing() && verifiedEmailMatches(existing().driverEmail))) && (
                             (existing().status == 'PREPARING' && incoming().status == 'OUT_FOR_DELIVERY' &&
                              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
                             (existing().status == 'OUT_FOR_DELIVERY' && incoming().status == 'DELIVERED' &&
