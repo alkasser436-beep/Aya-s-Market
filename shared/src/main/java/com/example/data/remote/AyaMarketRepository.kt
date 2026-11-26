@@ -54,10 +54,23 @@ class AyaMarketRepository(
             "ayasmarket44@gmail.com"
         )
 
+        fun resolveUserEmail(user: com.google.firebase.auth.FirebaseUser?): String? {
+            if (user == null) return null
+            val direct = user.email?.trim()?.takeIf { it.isNotBlank() }
+            if (direct != null) return direct
+            return user.providerData
+                .firstNotNullOfOrNull { it.email?.trim()?.takeIf { email -> email.isNotBlank() } }
+        }
+
         fun isAuthorizedOwner(user: com.google.firebase.auth.FirebaseUser?): Boolean {
-            if (user == null || !user.isEmailVerified) return false
-            val normalizedEmail = user.email?.trim()?.lowercase() ?: return false
-            return normalizedEmail in ADMIN_OWNER_EMAILS
+            if (user == null) return false
+            val normalizedEmail = resolveUserEmail(user)?.lowercase() ?: return false
+            if (normalizedEmail !in ADMIN_OWNER_EMAILS) return false
+            val hasGoogleProviderEmail = user.providerData.any {
+                it.providerId == com.google.firebase.auth.GoogleAuthProvider.PROVIDER_ID &&
+                    it.email?.trim()?.lowercase() == normalizedEmail
+            }
+            return user.isEmailVerified || hasGoogleProviderEmail
         }
     }
 
@@ -289,13 +302,15 @@ class AyaMarketRepository(
         fullName: String,
         phone: String,
         city: String,
-        defaultAddressLine: String = ""
+        defaultAddressLine: String = "",
+        preferredEmail: String = ""
     ): Result<Unit> {
         var path = "users"
         return try {
             val uid = requireUserId()
-            val email = auth.currentUser?.email?.trim()?.lowercase()?.takeIf { it.length >= 3 }
-                ?: "user_$uid@aya.local"
+            val authEmail = resolveUserEmail(auth.currentUser)?.lowercase()?.takeIf { it.length >= 3 }
+            val typedEmail = preferredEmail.trim().lowercase().takeIf { it.contains("@") && it.length in 3..120 }
+            val email = authEmail ?: typedEmail ?: "user_$uid@aya.local"
             require(fullName.trim().length in 1..80) { "Full name required" }
             require(phone.trim().length in 3..30) { "Phone required" }
             require(city.trim().length in 1..60) { "City required" }

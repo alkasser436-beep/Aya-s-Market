@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CurrencyExchange
+import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.LocalShipping
@@ -97,6 +98,7 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSignUpMode by remember(appRole) { mutableStateOf(false) }
+    var accountEmail by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var city by remember { mutableStateOf("") }
@@ -109,7 +111,7 @@ fun AuthScreen(
             if (appRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(currentUser)) {
                 onAuthSuccess()
             }
-        } else {
+        } else if (appRole != AppRole.ADMIN) {
             attemptAutoSignIn(
                 context = context,
                 credentialManager = credentialManager,
@@ -387,6 +389,19 @@ fun AuthScreen(
                         if (appRole == AppRole.CUSTOMER && isSignUpMode) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 OutlinedTextField(
+                                    value = accountEmail,
+                                    onValueChange = { accountEmail = it },
+                                    label = { Text(if (language == AppLanguage.AR) "البريد الإلكتروني" else "Email Address") },
+                                    placeholder = { Text("name@gmail.com") },
+                                    leadingIcon = { Icon(Icons.Rounded.Email, contentDescription = null) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("signup_email_input")
+                                )
+                                OutlinedTextField(
                                     value = fullName,
                                     onValueChange = { fullName = it },
                                     label = { Text(if (language == AppLanguage.AR) "الاسم الكامل" else "Full Name") },
@@ -540,12 +555,13 @@ fun AuthScreen(
                                         val user = safeCurrentFirebaseUser(context)
                                         if (appRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
                                             isLoading = false
-                                            val attempted = user?.email ?: ""
+                                            val attempted = AyaMarketRepository.resolveUserEmail(user) ?: (user?.uid ?: "")
+                                            val ownerEmail = AyaMarketRepository.ADMIN_OWNER_EMAILS.first()
                                             signOutUser(context, credentialManager, scope) {
                                                 errorMessage = if (language == AppLanguage.AR)
-                                                    "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحساب مالك المتجر فقط."
+                                                    "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحساب المالك ($ownerEmail) فقط."
                                                 else
-                                                    "Access denied ($attempted): Admin app is locked to the authorized store owner account only."
+                                                    "Access denied ($attempted): Admin app is locked to $ownerEmail only."
                                             }
                                         } else if (appRole == AppRole.CUSTOMER && isSignUpMode) {
                                             scope.launch {
@@ -554,7 +570,8 @@ fun AuthScreen(
                                                     fullName = fullName,
                                                     phone = phone,
                                                     city = city,
-                                                    defaultAddressLine = addressLine
+                                                    defaultAddressLine = addressLine,
+                                                    preferredEmail = accountEmail
                                                 )
                                                 isLoading = false
                                                 res.onSuccess {
@@ -597,6 +614,11 @@ fun AuthScreen(
                             onClick = {
                                 errorMessage = null
                                 if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                                    val trimmedEmail = accountEmail.trim()
+                                    if (trimmedEmail.length < 5 || !trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
+                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال بريد إلكتروني صحيح" else "Please enter a valid email address"
+                                        return@Button
+                                    }
                                     if (fullName.trim().length < 2) {
                                         errorMessage = if (language == AppLanguage.AR) "يرجى إدخال الاسم الكامل" else "Please enter your full name"
                                         return@Button

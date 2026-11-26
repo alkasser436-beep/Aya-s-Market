@@ -113,7 +113,7 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
 
             if (!isAuthorizedForRole) {
                 val unauthorizedEmail = if (firebaseReady && user != null && appRole == AppRole.ADMIN) {
-                    user.email ?: user.uid
+                    AyaMarketRepository.resolveUserEmail(user) ?: user.uid
                 } else null
 
                 val authBannerError = when {
@@ -156,7 +156,7 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
                     AyaMarketAuthenticatedApp(
                         appRole = appRole,
                         uid = uid,
-                        email = signedUser.email ?: "",
+                        email = AyaMarketRepository.resolveUserEmail(signedUser) ?: "",
                         displayName = signedUser.displayName ?: "",
                         prefsRepo = prefsRepo
                     )
