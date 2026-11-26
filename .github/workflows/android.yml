@@ -29,28 +29,97 @@ jobs:
             fi
           fi
 
-      - name: Restore google-services.json for all 3 apps
+      - name: Restore and verify google-services.json for all 3 apps
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          ADMIN_GOOGLE_SERVICES_JSON: ${{ secrets.ADMIN_GOOGLE_SERVICES_JSON }}
+          DRIVER_GOOGLE_SERVICES_JSON: ${{ secrets.DRIVER_GOOGLE_SERVICES_JSON }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ ! -f app/google-services.json ]; then
-            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            elif [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-              printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
-            fi
-          fi
+          python3 - <<'PY'
+          import base64, json, os, sys
 
-          if [ -f app/google-services.json ]; then
-            [ -f admin/google-services.json ] || cp app/google-services.json admin/google-services.json
-            [ -f driver/google-services.json ] || cp app/google-services.json driver/google-services.json
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "::error::Missing google-services.json! Add your app/google-services.json content as a GitHub Secret named GOOGLE_SERVICES_JSON (Repo Settings -> Secrets and variables -> Actions), or export/download the APK directly from AI Studio."
-            exit 1
-          else
-            echo "::warning::google-services.json is not present in this PR build; Firebase Sign-In will be disabled in generated APKs."
-          fi
+          targets = {
+              "app": "com.aistudio.ayamarket.kxmpzq",
+              "admin": "com.aistudio.ayamarket.admin.kxmpzq",
+              "driver": "com.aistudio.ayamarket.driver.kxmpzq",
+          }
+
+          def parse_json(raw):
+              if not raw or not raw.strip():
+                  return None
+              try:
+                  return json.loads(raw)
+              except Exception:
+                  return None
+
+          def has_package(data, pkg):
+              if not isinstance(data, dict):
+                  return False
+              for c in data.get("client", []):
+                  p = c.get("client_info", {}).get("android_client_info", {}).get("package_name")
+                  if p == pkg:
+                      return True
+              return False
+
+          secret_main = parse_json(os.environ.get("GOOGLE_SERVICES_JSON"))
+          if not secret_main and os.environ.get("GOOGLE_SERVICES_JSON_BASE64"):
+              try:
+                  decoded = base64.b64decode("".join(os.environ["GOOGLE_SERVICES_JSON_BASE64"].split())).decode("utf-8")
+                  secret_main = parse_json(decoded)
+              except Exception:
+                  secret_main = None
+
+          per_module_secrets = {
+              "app": secret_main,
+              "admin": parse_json(os.environ.get("ADMIN_GOOGLE_SERVICES_JSON")) or secret_main,
+              "driver": parse_json(os.environ.get("DRIVER_GOOGLE_SERVICES_JSON")) or secret_main,
+          }
+
+          repo_app = None
+          if os.path.exists("app/google-services.json"):
+              with open("app/google-services.json", "r", encoding="utf-8") as f:
+                  repo_app = parse_json(f.read())
+
+          missing = []
+          for mod, pkg in targets.items():
+              path = f"{mod}/google-services.json"
+              existing = None
+              if os.path.exists(path):
+                  with open(path, "r", encoding="utf-8") as f:
+                      existing = parse_json(f.read())
+
+              chosen = None
+              if has_package(per_module_secrets[mod], pkg):
+                  chosen = per_module_secrets[mod]
+              elif has_package(existing, pkg):
+                  chosen = existing
+              elif has_package(repo_app, pkg):
+                  chosen = repo_app
+
+              if chosen is not None:
+                  with open(path, "w", encoding="utf-8") as f:
+                      json.dump(chosen, f, indent=2)
+                  print(f"OK: {path} configured for {pkg}")
+              else:
+                  if os.path.exists(path):
+                      os.remove(path)
+                      print(f"::warning::Removed mismatched {path} (did not contain client {pkg})")
+                  missing.append(f"{mod} ({pkg})")
+
+          if missing:
+              msg = (
+                  "Missing Firebase client config for: " + ", ".join(missing) + ". "
+                  "Copy the latest app/google-services.json from AI Studio (which includes all 3 package names) "
+                  "into GitHub Secret GOOGLE_SERVICES_JSON, or download the APK directly from AI Studio."
+              )
+              if os.environ.get("EVENT_NAME") == "push":
+                  print(f"::error::{msg}")
+                  sys.exit(1)
+              else:
+                  print(f"::warning::{msg}")
+          PY
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
