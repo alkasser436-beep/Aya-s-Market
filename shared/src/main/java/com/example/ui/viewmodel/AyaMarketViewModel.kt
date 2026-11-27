@@ -228,11 +228,18 @@ class AyaMarketViewModel(
         phone: String,
         city: String,
         defaultAddressLine: String = "",
+        preferredEmail: String = "",
         onDone: () -> Unit = {}
     ) {
         viewModelScope.launch {
             _isBusy.value = true
-            val res = repository.saveCustomerProfile(fullName, phone, city, defaultAddressLine)
+            val res = repository.saveCustomerProfile(
+                fullName = fullName,
+                phone = phone,
+                city = city,
+                defaultAddressLine = defaultAddressLine,
+                preferredEmail = preferredEmail
+            )
             _isBusy.value = false
             res.onSuccess {
                 emitMsg(if (language.value == AppLanguage.AR) "تم حفظ بيانات الحساب بنجاح" else "Account profile saved")

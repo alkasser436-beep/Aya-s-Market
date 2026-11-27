@@ -21,10 +21,12 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "Auth"
 
@@ -92,15 +94,17 @@ fun attemptAutoSignIn(
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
-                runCatching { Firebase.auth.currentUser?.reload()?.await() }
-                onAuthSuccess()
+                withTimeoutOrNull(3000L) {
+                    runCatching { Firebase.auth.currentUser?.reload()?.await() }
+                }
+                withContext(Dispatchers.Main) { onAuthSuccess() }
             } else {
-                onUnauthenticated()
+                withContext(Dispatchers.Main) { onUnauthenticated() }
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Throwable) {
-            onUnauthenticated()
+            withContext(Dispatchers.Main) { onUnauthenticated() }
         }
     }
 }
@@ -152,19 +156,21 @@ fun onGoogleSignInClicked(
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
-                runCatching { Firebase.auth.currentUser?.reload()?.await() }
-                onAuthSuccess()
+                withTimeoutOrNull(3000L) {
+                    runCatching { Firebase.auth.currentUser?.reload()?.await() }
+                }
+                withContext(Dispatchers.Main) { onAuthSuccess() }
             } else {
-                onAuthError("Unexpected credential type")
+                withContext(Dispatchers.Main) { onAuthError("Unexpected credential type") }
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            onAuthCancelled()
+            withContext(Dispatchers.Main) { onAuthCancelled() }
         } catch (t: Throwable) {
             Log.e(TAG, "Google Sign-In failed", t)
-            onAuthError(t.localizedMessage ?: "Sign in failed")
+            withContext(Dispatchers.Main) { onAuthError(t.localizedMessage ?: "Sign in failed") }
         }
     }
 }

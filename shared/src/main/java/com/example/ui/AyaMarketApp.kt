@@ -58,6 +58,7 @@ import com.example.data.remote.AyaMarketRepository
 import com.example.localization.AppStrings
 import com.example.ui.admin.AdminDashboardScreen
 import com.example.ui.auth.AuthScreen
+import com.example.ui.auth.PendingCustomerProfile
 import com.example.ui.auth.isFirebaseReady
 import com.example.ui.auth.safeCurrentFirebaseUser
 import com.example.ui.auth.signOutUser
@@ -89,15 +90,27 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
     var currentUser by remember(firebaseReady) {
         mutableStateOf(if (firebaseReady) safeCurrentFirebaseUser(context) else null)
     }
+    var authRefreshTick by remember { mutableIntStateOf(0) }
+    var pendingSignupProfile by remember { mutableStateOf<PendingCustomerProfile?>(null) }
+
     DisposableEffect(firebaseReady) {
         if (!firebaseReady) {
             onDispose { }
         } else {
-            val listener = FirebaseAuth.AuthStateListener { auth ->
+            val authListener = FirebaseAuth.AuthStateListener { auth ->
                 currentUser = auth.currentUser
+                authRefreshTick++
             }
-            Firebase.auth.addAuthStateListener(listener)
-            onDispose { Firebase.auth.removeAuthStateListener(listener) }
+            val tokenListener = FirebaseAuth.IdTokenListener { auth ->
+                currentUser = auth.currentUser
+                authRefreshTick++
+            }
+            Firebase.auth.addAuthStateListener(authListener)
+            Firebase.auth.addIdTokenListener(tokenListener)
+            onDispose {
+                Firebase.auth.removeAuthStateListener(authListener)
+                Firebase.auth.removeIdTokenListener(tokenListener)
+            }
         }
     }
 
@@ -106,6 +119,9 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
 
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         AyaMarketTheme(isArabic = isArabic) {
+            // Read authRefreshTick so Compose re-evaluates after FirebaseUser.reload()
+            @Suppress("UNUSED_EXPRESSION")
+            authRefreshTick
             val user = currentUser
             val isAuthorizedForRole = firebaseReady && user != null && (
                 appRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(user)
@@ -144,9 +160,14 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
                     firebaseReady = firebaseReady,
                     onSignOutClick = {
                         currentUser = safeCurrentFirebaseUser(context)
+                        authRefreshTick++
+                    },
+                    onSignupProfileReady = { profile ->
+                        pendingSignupProfile = profile
                     },
                     onAuthSuccess = {
                         currentUser = safeCurrentFirebaseUser(context)
+                        authRefreshTick++
                     }
                 )
             } else {
@@ -158,7 +179,9 @@ fun AyaMarketRoot(appRole: AppRole = AppRole.CUSTOMER) {
                         uid = uid,
                         email = AyaMarketRepository.resolveUserEmail(signedUser) ?: "",
                         displayName = signedUser.displayName ?: "",
-                        prefsRepo = prefsRepo
+                        prefsRepo = prefsRepo,
+                        pendingSignupProfile = pendingSignupProfile,
+                        onClearPendingSignupProfile = { pendingSignupProfile = null }
                     )
                 }
             }
@@ -172,7 +195,9 @@ private fun AyaMarketAuthenticatedApp(
     uid: String,
     email: String,
     displayName: String,
-    prefsRepo: UserPreferencesRepository
+    prefsRepo: UserPreferencesRepository,
+    pendingSignupProfile: PendingCustomerProfile? = null,
+    onClearPendingSignupProfile: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -230,6 +255,21 @@ private fun AyaMarketAuthenticatedApp(
     LaunchedEffect(Unit) {
         viewModel.messages.collect { msg ->
             snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    LaunchedEffect(uid, appRole, pendingSignupProfile) {
+        val pending = pendingSignupProfile
+        if (appRole == AppRole.CUSTOMER && pending != null) {
+            viewModel.saveCustomerProfile(
+                fullName = pending.fullName,
+                phone = pending.phone,
+                city = pending.city,
+                defaultAddressLine = pending.addressLine,
+                preferredEmail = pending.email
+            ) {
+                onClearPendingSignupProfile()
+            }
         }
     }
 

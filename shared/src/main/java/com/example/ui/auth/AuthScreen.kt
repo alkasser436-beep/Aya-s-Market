@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +82,14 @@ import com.example.data.model.AppRole
 import com.example.data.remote.AyaMarketRepository
 import com.example.localization.AppStrings
 
+data class PendingCustomerProfile(
+    val fullName: String,
+    val phone: String,
+    val city: String,
+    val addressLine: String,
+    val email: String
+)
+
 @Composable
 fun AuthScreen(
     appRole: AppRole = AppRole.CUSTOMER,
@@ -90,14 +99,18 @@ fun AuthScreen(
     signedInUnauthorizedEmail: String? = null,
     firebaseReady: Boolean = true,
     onSignOutClick: () -> Unit = {},
+    onSignupProfileReady: (PendingCustomerProfile?) -> Unit = {},
     onAuthSuccess: () -> Unit
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSignUpMode by remember(appRole) { mutableStateOf(false) }
+    var attemptedSubmit by remember { mutableStateOf(false) }
     var accountEmail by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
@@ -131,6 +144,12 @@ fun AuthScreen(
     val appSubtitle = AppStrings.appSubtitleForRole(appRole, language)
     val displayedError = externalError ?: errorMessage
 
+    LaunchedEffect(displayedError) {
+        if (displayedError != null) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -157,7 +176,7 @@ fun AuthScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -387,14 +406,19 @@ fun AuthScreen(
                         }
 
                         if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                            val trimmedEmail = accountEmail.trim()
+                            val emailInvalid = attemptedSubmit && (trimmedEmail.length < 5 || !trimmedEmail.contains("@") || !trimmedEmail.contains("."))
+                            val nameInvalid = attemptedSubmit && fullName.trim().length < 2
+                            val phoneInvalid = attemptedSubmit && phone.trim().length < 3
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 OutlinedTextField(
                                     value = accountEmail,
-                                    onValueChange = { accountEmail = it },
+                                    onValueChange = { accountEmail = it; errorMessage = null },
                                     label = { Text(if (language == AppLanguage.AR) "البريد الإلكتروني" else "Email Address") },
                                     placeholder = { Text("name@gmail.com") },
                                     leadingIcon = { Icon(Icons.Rounded.Email, contentDescription = null) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                    isError = emailInvalid,
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier
@@ -403,9 +427,10 @@ fun AuthScreen(
                                 )
                                 OutlinedTextField(
                                     value = fullName,
-                                    onValueChange = { fullName = it },
+                                    onValueChange = { fullName = it; errorMessage = null },
                                     label = { Text(if (language == AppLanguage.AR) "الاسم الكامل" else "Full Name") },
                                     leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
+                                    isError = nameInvalid,
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier
@@ -414,11 +439,12 @@ fun AuthScreen(
                                 )
                                 OutlinedTextField(
                                     value = phone,
-                                    onValueChange = { phone = it },
+                                    onValueChange = { phone = it; errorMessage = null },
                                     label = { Text(if (language == AppLanguage.AR) "رقم الهاتف" else "Phone Number") },
                                     placeholder = { Text("+961 71 123 456") },
                                     leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    isError = phoneInvalid,
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier
@@ -427,8 +453,8 @@ fun AuthScreen(
                                 )
                                 OutlinedTextField(
                                     value = city,
-                                    onValueChange = { city = it },
-                                    label = { Text(if (language == AppLanguage.AR) "المدينة / المنطقة" else "City / Area") },
+                                    onValueChange = { city = it; errorMessage = null },
+                                    label = { Text(if (language == AppLanguage.AR) "المدينة / المنطقة (اختياري)" else "City / Area (Optional)") },
                                     placeholder = { Text(if (language == AppLanguage.AR) "بيروت" else "Beirut") },
                                     leadingIcon = { Icon(Icons.Rounded.LocationCity, contentDescription = null) },
                                     singleLine = true,
@@ -563,23 +589,6 @@ fun AuthScreen(
                                                 else
                                                     "Access denied ($attempted): Admin app is locked to $ownerEmail only."
                                             }
-                                        } else if (appRole == AppRole.CUSTOMER && isSignUpMode) {
-                                            scope.launch {
-                                                val repo = AyaMarketRepository(context)
-                                                val res = repo.saveCustomerProfile(
-                                                    fullName = fullName,
-                                                    phone = phone,
-                                                    city = city,
-                                                    defaultAddressLine = addressLine,
-                                                    preferredEmail = accountEmail
-                                                )
-                                                isLoading = false
-                                                res.onSuccess {
-                                                    onAuthSuccess()
-                                                }.onFailure { err ->
-                                                    errorMessage = err.localizedMessage ?: "Failed to save account profile"
-                                                }
-                                            }
                                         } else {
                                             isLoading = false
                                             onAuthSuccess()
@@ -612,7 +621,9 @@ fun AuthScreen(
 
                         Button(
                             onClick = {
+                                focusManager.clearFocus()
                                 errorMessage = null
+                                attemptedSubmit = true
                                 if (appRole == AppRole.CUSTOMER && isSignUpMode) {
                                     val trimmedEmail = accountEmail.trim()
                                     if (trimmedEmail.length < 5 || !trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
@@ -623,14 +634,24 @@ fun AuthScreen(
                                         errorMessage = if (language == AppLanguage.AR) "يرجى إدخال الاسم الكامل" else "Please enter your full name"
                                         return@Button
                                     }
-                                    if (phone.trim().length < 6) {
-                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال رقم هاتف صحيح" else "Please enter a valid phone number"
+                                    if (phone.trim().length < 3) {
+                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال رقم الهاتف" else "Please enter a valid phone number"
                                         return@Button
                                     }
-                                    if (city.trim().length < 2) {
-                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال المدينة أو المنطقة" else "Please enter your city or area"
-                                        return@Button
+                                    val resolvedCity = city.trim().ifBlank {
+                                        if (language == AppLanguage.AR) "بيروت" else "Beirut"
                                     }
+                                    onSignupProfileReady(
+                                        PendingCustomerProfile(
+                                            fullName = fullName.trim(),
+                                            phone = phone.trim(),
+                                            city = resolvedCity,
+                                            addressLine = addressLine.trim(),
+                                            email = trimmedEmail
+                                        )
+                                    )
+                                } else {
+                                    onSignupProfileReady(null)
                                 }
                                 isLoading = true
                                 launchGoogleAuth()
