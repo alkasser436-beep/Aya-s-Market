@@ -18,6 +18,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -112,10 +113,11 @@ fun attemptAutoSignIn(
 fun onGoogleSignInClicked(
     context: Context,
     credentialManager: CredentialManager,
+    loginHint: String? = null,
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     scope: CoroutineScope,
-    onAuthCancelled: () -> Unit = {}
+    onAuthCancelled: (String?) -> Unit = {}
 ) {
     if (!isFirebaseReady(context)) {
         onAuthError("Firebase is not configured in this build (missing google-services.json).")
@@ -167,10 +169,101 @@ fun onGoogleSignInClicked(
             throw ce
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            withContext(Dispatchers.Main) { onAuthCancelled() }
+            withContext(Dispatchers.Main) { onAuthCancelled(e.message) }
         } catch (t: Throwable) {
-            Log.e(TAG, "Google Sign-In failed", t)
-            withContext(Dispatchers.Main) { onAuthError(t.localizedMessage ?: "Sign in failed") }
+            Log.w(TAG, "Credential Manager Google Sign-In failed (${t.message}), launching browser OAuth fallback", t)
+            launchBrowserGoogleOAuth(
+                activity = activity,
+                loginHint = loginHint,
+                onAuthSuccess = onAuthSuccess,
+                onAuthError = onAuthError,
+                onAuthCancelled = onAuthCancelled
+            )
+        }
+    }
+}
+
+fun signInWithGoogleBrowser(
+    context: Context,
+    loginHint: String? = null,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    scope: CoroutineScope,
+    onAuthCancelled: (String?) -> Unit = {}
+) {
+    if (!isFirebaseReady(context)) {
+        onAuthError("Firebase is not configured in this build (missing google-services.json).")
+        return
+    }
+    val activity = context.findActivity()
+    if (activity == null) {
+        onAuthError("Unable to launch browser Google Sign-In without an Activity context")
+        return
+    }
+    scope.launch {
+        launchBrowserGoogleOAuth(
+            activity = activity,
+            loginHint = loginHint,
+            onAuthSuccess = onAuthSuccess,
+            onAuthError = onAuthError,
+            onAuthCancelled = onAuthCancelled
+        )
+    }
+}
+
+suspend fun checkPendingBrowserSignIn(
+    context: Context,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit
+) {
+    if (!isFirebaseReady(context)) return
+    try {
+        val pending = Firebase.auth.pendingAuthResult ?: return
+        pending.await()
+        withTimeoutOrNull(3000L) {
+            runCatching { Firebase.auth.currentUser?.reload()?.await() }
+        }
+        withContext(Dispatchers.Main) { onAuthSuccess() }
+    } catch (ce: CancellationException) {
+        throw ce
+    } catch (t: Throwable) {
+        Log.w(TAG, "Pending browser sign-in failed: ${t.message}", t)
+        withContext(Dispatchers.Main) { onAuthError(t.localizedMessage ?: "Sign in failed") }
+    }
+}
+
+private suspend fun launchBrowserGoogleOAuth(
+    activity: Activity,
+    loginHint: String?,
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    onAuthCancelled: (String?) -> Unit
+) {
+    try {
+        val pending = Firebase.auth.pendingAuthResult
+        if (pending != null) {
+            pending.await()
+        } else {
+            val builder = OAuthProvider.newBuilder("google.com")
+            builder.addCustomParameter("prompt", "select_account")
+            if (!loginHint.isNullOrBlank()) {
+                builder.addCustomParameter("login_hint", loginHint.trim())
+            }
+            Firebase.auth.startActivityForSignInWithProvider(activity, builder.build()).await()
+        }
+        withTimeoutOrNull(3000L) {
+            runCatching { Firebase.auth.currentUser?.reload()?.await() }
+        }
+        withContext(Dispatchers.Main) { onAuthSuccess() }
+    } catch (ce: CancellationException) {
+        throw ce
+    } catch (t: Throwable) {
+        val msg = t.localizedMessage ?: "Sign in failed"
+        if (msg.contains("cancel", ignoreCase = true)) {
+            withContext(Dispatchers.Main) { onAuthCancelled(msg) }
+        } else {
+            Log.e(TAG, "Browser Google OAuth failed", t)
+            withContext(Dispatchers.Main) { onAuthError(msg) }
         }
     }
 }

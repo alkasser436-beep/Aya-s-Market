@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.LocationCity
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
@@ -119,6 +120,16 @@ fun AuthScreen(
 
     LaunchedEffect(appRole, firebaseReady) {
         if (!firebaseReady) return@LaunchedEffect
+        checkPendingBrowserSignIn(
+            context = context,
+            onAuthSuccess = {
+                val user = safeCurrentFirebaseUser(context)
+                if (appRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(user)) {
+                    onAuthSuccess()
+                }
+            },
+            onAuthError = { msg -> errorMessage = msg }
+        )
         val currentUser = safeCurrentFirebaseUser(context)
         if (currentUser != null) {
             if (appRole != AppRole.ADMIN || AyaMarketRepository.isAuthorizedOwner(currentUser)) {
@@ -572,42 +583,104 @@ fun AuthScreen(
                             }
                         }
 
-                        val launchGoogleAuth = {
-                            val startSignIn = {
-                                onGoogleSignInClicked(
-                                    context = context,
-                                    credentialManager = credentialManager,
-                                    onAuthSuccess = {
-                                        val user = safeCurrentFirebaseUser(context)
-                                        if (appRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
-                                            isLoading = false
-                                            val attempted = AyaMarketRepository.resolveUserEmail(user) ?: (user?.uid ?: "")
-                                            val ownerEmail = AyaMarketRepository.ADMIN_OWNER_EMAILS.first()
-                                            signOutUser(context, credentialManager, scope) {
-                                                errorMessage = if (language == AppLanguage.AR)
-                                                    "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحساب المالك ($ownerEmail) فقط."
-                                                else
-                                                    "Access denied ($attempted): Admin app is locked to $ownerEmail only."
-                                            }
-                                        } else {
-                                            isLoading = false
-                                            onAuthSuccess()
-                                        }
-                                    },
-                                    onAuthError = { msg ->
-                                        isLoading = false
-                                        errorMessage = msg
-                                    },
-                                    scope = scope,
-                                    onAuthCancelled = {
-                                        isLoading = false
-                                        errorMessage = if (language == AppLanguage.AR) {
-                                            "لم يكتمل اختيار حساب Google. تأكد من وجود حساب Google مسجل في جهازك وحاول مرة أخرى."
-                                        } else {
-                                            "Google account selection was cancelled. Ensure a Google account is added on your device and try again."
-                                        }
+                        val resolvedHint = when {
+                            appRole == AppRole.ADMIN -> AyaMarketRepository.ADMIN_OWNER_EMAILS.first()
+                            appRole == AppRole.CUSTOMER && isSignUpMode -> accountEmail.trim().takeIf { it.contains("@") }
+                            else -> null
+                        }
+
+                        val handleAuthComplete: () -> Unit = {
+                            val user = safeCurrentFirebaseUser(context)
+                            if (appRole == AppRole.ADMIN && !AyaMarketRepository.isAuthorizedOwner(user)) {
+                                isLoading = false
+                                val attempted = AyaMarketRepository.resolveUserEmail(user) ?: (user?.uid ?: "")
+                                val ownerEmail = AyaMarketRepository.ADMIN_OWNER_EMAILS.first()
+                                signOutUser(context, credentialManager, scope) {
+                                    errorMessage = if (language == AppLanguage.AR)
+                                        "دخول مرفوض ($attempted): تطبيق الإدارة محصور بحساب المالك ($ownerEmail) فقط."
+                                    else
+                                        "Access denied ($attempted): Admin app is locked to $ownerEmail only."
+                                }
+                            } else {
+                                isLoading = false
+                                onAuthSuccess()
+                            }
+                        }
+
+                        val handleAuthCancelled: (String?) -> Unit = { cancelDetail ->
+                            isLoading = false
+                            val detailSuffix = cancelDetail?.trim()?.takeIf { it.isNotBlank() }?.let { "\n($it)" } ?: ""
+                            errorMessage = if (language == AppLanguage.AR) {
+                                "لم يكتمل اختيار حساب Google من نافذة النظام. جرّب زر «الدخول عبر متصفح Google» أدناه لكتابة البريد الإلكتروني مباشرة.$detailSuffix"
+                            } else {
+                                "Google account picker was cancelled or blocked. Use «Sign in via Google Browser» below to sign in directly.$detailSuffix"
+                            }
+                        }
+
+                        val validateAndPrepareSignup: () -> Boolean = {
+                            focusManager.clearFocus()
+                            errorMessage = null
+                            attemptedSubmit = true
+                            if (appRole == AppRole.CUSTOMER && isSignUpMode) {
+                                val trimmedEmail = accountEmail.trim()
+                                if (trimmedEmail.length < 5 || !trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
+                                    errorMessage = if (language == AppLanguage.AR) "يرجى إدخال بريد إلكتروني صحيح" else "Please enter a valid email address"
+                                    false
+                                } else if (fullName.trim().length < 2) {
+                                    errorMessage = if (language == AppLanguage.AR) "يرجى إدخال الاسم الكامل" else "Please enter your full name"
+                                    false
+                                } else if (phone.trim().length < 3) {
+                                    errorMessage = if (language == AppLanguage.AR) "يرجى إدخال رقم الهاتف" else "Please enter a valid phone number"
+                                    false
+                                } else {
+                                    val resolvedCity = city.trim().ifBlank {
+                                        if (language == AppLanguage.AR) "بيروت" else "Beirut"
                                     }
-                                )
+                                    onSignupProfileReady(
+                                        PendingCustomerProfile(
+                                            fullName = fullName.trim(),
+                                            phone = phone.trim(),
+                                            city = resolvedCity,
+                                            addressLine = addressLine.trim(),
+                                            email = trimmedEmail
+                                        )
+                                    )
+                                    true
+                                }
+                            } else {
+                                onSignupProfileReady(null)
+                                true
+                            }
+                        }
+
+                        val launchGoogleAuth = { useBrowserOnly: Boolean ->
+                            val startSignIn = {
+                                if (useBrowserOnly) {
+                                    signInWithGoogleBrowser(
+                                        context = context,
+                                        loginHint = resolvedHint,
+                                        onAuthSuccess = handleAuthComplete,
+                                        onAuthError = { msg ->
+                                            isLoading = false
+                                            errorMessage = msg
+                                        },
+                                        scope = scope,
+                                        onAuthCancelled = handleAuthCancelled
+                                    )
+                                } else {
+                                    onGoogleSignInClicked(
+                                        context = context,
+                                        credentialManager = credentialManager,
+                                        loginHint = resolvedHint,
+                                        onAuthSuccess = handleAuthComplete,
+                                        onAuthError = { msg ->
+                                            isLoading = false
+                                            errorMessage = msg
+                                        },
+                                        scope = scope,
+                                        onAuthCancelled = handleAuthCancelled
+                                    )
+                                }
                             }
 
                             if (safeCurrentFirebaseUser(context) != null) {
@@ -621,40 +694,9 @@ fun AuthScreen(
 
                         Button(
                             onClick = {
-                                focusManager.clearFocus()
-                                errorMessage = null
-                                attemptedSubmit = true
-                                if (appRole == AppRole.CUSTOMER && isSignUpMode) {
-                                    val trimmedEmail = accountEmail.trim()
-                                    if (trimmedEmail.length < 5 || !trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
-                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال بريد إلكتروني صحيح" else "Please enter a valid email address"
-                                        return@Button
-                                    }
-                                    if (fullName.trim().length < 2) {
-                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال الاسم الكامل" else "Please enter your full name"
-                                        return@Button
-                                    }
-                                    if (phone.trim().length < 3) {
-                                        errorMessage = if (language == AppLanguage.AR) "يرجى إدخال رقم الهاتف" else "Please enter a valid phone number"
-                                        return@Button
-                                    }
-                                    val resolvedCity = city.trim().ifBlank {
-                                        if (language == AppLanguage.AR) "بيروت" else "Beirut"
-                                    }
-                                    onSignupProfileReady(
-                                        PendingCustomerProfile(
-                                            fullName = fullName.trim(),
-                                            phone = phone.trim(),
-                                            city = resolvedCity,
-                                            addressLine = addressLine.trim(),
-                                            email = trimmedEmail
-                                        )
-                                    )
-                                } else {
-                                    onSignupProfileReady(null)
-                                }
+                                if (!validateAndPrepareSignup()) return@Button
                                 isLoading = true
-                                launchGoogleAuth()
+                                launchGoogleAuth(false)
                             },
                             enabled = firebaseReady && !isLoading,
                             modifier = Modifier
@@ -665,15 +707,16 @@ fun AuthScreen(
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = when (appRole) {
                                     AppRole.DRIVER -> Color(0xFFE65100)
-                                    AppRole.ADMIN -> Color(0xFF064E30)
+                                    AppRole.ADMIN -> Color(0xFF0E7A55)
                                     AppRole.CUSTOMER -> MaterialTheme.colorScheme.primary
-                                }
+                                },
+                                contentColor = Color.White
                             )
                         ) {
                             if (isLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(22.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    color = Color.White,
                                     strokeWidth = 2.5.dp
                                 )
                             } else {
@@ -687,9 +730,38 @@ fun AuthScreen(
                                         appRole == AppRole.CUSTOMER && isSignUpMode -> if (language == AppLanguage.AR) "إنشاء حساب عبر Google" else "Create Account with Google"
                                         else -> AppStrings.signInWithGoogle(language)
                                     },
-                                    style = MaterialTheme.typography.titleMedium
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White
                                 )
                             }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                if (!validateAndPrepareSignup()) return@OutlinedButton
+                                isLoading = true
+                                launchGoogleAuth(true)
+                            },
+                            enabled = firebaseReady && !isLoading,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("browser_google_sign_in_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.OpenInBrowser,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (language == AppLanguage.AR) {
+                                    "الدخول عبر متصفح Google (بديل)"
+                                } else {
+                                    "Sign in via Google Browser"
+                                }
+                            )
                         }
 
                         if (appRole == AppRole.CUSTOMER) {
